@@ -5,8 +5,8 @@ BeamNG's box really lands on GTA's car, holds BeamNG's car and bends it is Treto
   proxy  : PuppetSolid=1, TrafficProxies=4, FAKE_TRAFFIC=1 FAKE_PSKICK=1: 4 boxes ready before the drive; the parked GTA car gets
            one before the car meets it; the fake BeamNG car hits the box; the contact is logged as BeamNG's; GTA's car copies the
            box; the hidden car is set not to collide with that GTA car (so the fake's GTA crash never happens); back to GTA.
-  vjump  : the same with FAKE_TWIN_VJUMP=1 (the box's speed reads 9000 m/s one frame after its teleport): that pose is not taken
-           and the box is not thrown.
+  vjump  : the same with FAKE_TWIN_VJUMP=1 (the box's speed reads 9000 m/s for one frame, 6 frames after its teleport): that pose
+           is not taken and the box is not thrown.
   middle : the same with FAKE_BOX_MIDDLE=1 (BeamNG places a box by its bottom middle, not its position): learned from the first
            box (it came out exactly that offset away), put again, then as proxy.
   stale  : the same with FAKE_TWIN_STALE=3 (BeamNG says the box's old spot for 3 frames after its teleport): no pose goes to GTA
