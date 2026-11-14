@@ -67,7 +67,8 @@ Everything is in `GtaBeamD1.ini`, with comments. The ones you're most likely to 
 - `PuppetSolid=1` (default): GTA's world reacts to your car with GTA's own physics. `0` goes back to the 2.76 way (traffic you touch vanishes, set by `TrafficMode`).
 - `PuppetNoMap=1` (default, 2.81): GTA's hidden car ignores GTA's map and BeamNG's solid posts; BeamNG alone hits them. `0`: the 2.77 way.
 - `CrashHurt=0` (default, 2.81): crashes don't hurt you. `1`: they do (Ctrl+F9 switches it in game).
-- `PuppetPassCar=1` (2.82, being tested): teleported into the traffic car it just hit, the hidden car doesn't collide with that car until the two are apart (in 2.81 those cars vanished). `0`: the 2.81 way.
+- `PuppetPassCar=1` (2.82): tested, it didn't keep the cars: GTA removes any traffic car the hidden car is teleported onto, colliding or not.
+- `TrafficProxies=4` (2.83, being tested; needs the 2.83 BeamNG mod): that many boxes wait in BeamNG. A GTA car about to meet yours gets one (sizes and weights: `proxyPool` in `GtaBeamD1_traffic.json`), BeamNG resolves the crash, GTA's car copies its box and the hidden car ignores that GTA car. `0`: the 2.82 way.
 - `Weapons=0` turns off weapon damage on the car.
 - `DriveGravity` sets how heavy the car feels (1.1).
 - `ShowCarsMax` (4) is how many show cars you can park; each one uses video memory.

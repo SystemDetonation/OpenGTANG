@@ -445,16 +445,25 @@ ge.execute('''
   end
   function TV:getDirectionVector() return { x = self.f.x, y = self.f.y, z = 0 } end
   function TV:getDirectionVectorUp() return { x = 0, y = 0, z = 1 } end
-  function TV:getVelocity() return { x = self.vel.x, y = self.vel.y, z = self.vel.z } end
+  function TV:getVelocity()
+    if (self.vjN or 0) == 1 then return { x = 0, y = 0, z = -9000 } end
+    return { x = self.vel.x, y = self.vel.y, z = self.vel.z }
+  end
   function TV:getRefNodeId() return 0 end
-  function TV:getNodePosition(c) local l = self.nodes[c + 1]; local d = self.dent[c + 1] or { 0, 0, 0 }; return trot(self, { l[1] + d[1], l[2] + d[2], l[3] + d[3] }) end
+  function TV:getNodePosition(c) local l = self.nodes[c + 1]; local d = self.dent[c + 1] or { 0, 0, 0 }; local k = self.box and not self.tped and BOX_SIZE or 1; return trot(self, { (l[1] + d[1]) * k, (l[2] + d[2]) * k, (l[3] + d[3]) * k }) end
   function TV:setActive(on) self.active = on == 1 or on == true; TWINLOG(self.name .. ' active ' .. tostring(self.active)) end
   function TV:setPositionRotation(x, y, z, qx, qy, qz, qw)
     local f = QROT({ x = qx, y = qy, z = qz, w = qw }, { x = 0, y = -1, z = 0 })
     local l = math.sqrt(f.x * f.x + f.y * f.y)
     self.f = { x = f.x / l, y = f.y / l, z = 0 }
+    self.tped = true
     if TWIN_STALE > 0 then self.oldpos, self.staleN = self.pos, TWIN_STALE end
+    self.vjN = TWIN_VJUMP > 0 and 7 or 0   -- (6 frames after the teleport: a box's poses go to GTA from its 4th frame)
     self.pos = { x = x, y = y, z = z }
+    if self.box and BOX_MIDDLE then
+      local co = trot(self, { self.ctr[1], self.ctr[2], 0 })
+      self.pos = { x = x - co.x, y = y - co.y, z = z }
+    end
     self.vel = { x = 0, y = 0, z = 0 }
     self.dent = {}
     self.hit = nil
@@ -463,16 +472,25 @@ ge.execute('''
   function TV:applyClusterVelocityScaleAdd(c, sc, ax, ay, az) self.vel = { x = self.vel.x * sc + ax, y = self.vel.y * sc + ay, z = self.vel.z * sc + az } end
   function TV:queueLuaCommand(s) end
   function TV:delete() self.alive = false end
-  local function spawnTwin(model, o)
+  local function spawnTwin(model, o, box)
     local t = setmetatable({ id = 3000 + #TWINS, alive = true, active = true, name = o.vehicleName, model = model, pos = { x = o.pos.x, y = o.pos.y, z = o.pos.z },
-                             f = { x = 0, y = -1, z = 0 }, vel = { x = 0, y = 0, z = 0 }, nodes = {}, dent = {} }, TV)
-    for _, x in ipairs({ -0.9, 0, 0.9 }) do for _, y in ipairs({ -2.3, -1.2, 0, 1.2, 2.3 }) do for _, z in ipairs({ -0.2, 0.9 }) do t.nodes[#t.nodes + 1] = { x, y, z } end end end
-    local nb = #t.nodes
+                             f = { x = 0, y = -1, z = 0 }, vel = { x = 0, y = 0, z = 0 }, nodes = {}, dent = {}, ctr = { 0, 0 }, hw = 0.9, hl = 2.3 }, TV)
     t.wheels = {}
+    if box then
+      -- v2.83: a proxy box (gtab_prop): 8 corner nodes, rigid; its position is its ref node g0 (a bottom corner: left = jbeam +x,
+      -- back = jbeam +y, so the others lie to its left and behind it); FAKE_BOX_SIZE=<x>: until its first teleport its nodes read x
+      -- times as far apart as they are (the measuring is off, the box is right: his v2.75 log's covet "8.1 x 49.9 m")
+      local gx, gy, gz = box['$gx'], box['$gy'], box['$gz']
+      if BOX_DEFAULT then gx, gy, gz = 0.5, 0.5, 1.0 end   -- (the jbeam variables not passed)
+      for _, z in ipairs({ 0, gz }) do for _, y in ipairs({ 0, -gy }) do for _, x in ipairs({ 0, -gx }) do t.nodes[#t.nodes + 1] = { x, y, z } end end end
+      t.box, t.ctr, t.hw, t.hl = true, { -gx / 2, -gy / 2 }, gx / 2, gy / 2
+    else
+    for _, x in ipairs({ -0.9, 0, 0.9 }) do for _, y in ipairs({ -2.3, -1.2, 0, 1.2, 2.3 }) do for _, z in ipairs({ -0.2, 0.9 }) do t.nodes[#t.nodes + 1] = { x, y, z } end end end
     for w, wp in ipairs({ { 0.8, 1.4 }, { -0.8, 1.4 }, { 0.8, -1.4 }, { -0.8, -1.4 } }) do
       t.nodes[#t.nodes + 1] = { wp[1] - 0.1, wp[2], -0.17 }
       t.nodes[#t.nodes + 1] = { wp[1] + 0.1, wp[2], -0.17 }
       t.wheels[w] = { name = 'w' .. w, node1 = #t.nodes - 2, node2 = #t.nodes - 1, radius = 0.33 }
+    end
     end
     TWINS[#TWINS + 1] = t
     TWINLOG(string.format('%s spawned: a %s at %.1f %.1f %.1f', t.name, model, o.pos.x, o.pos.y, o.pos.z))
@@ -484,18 +502,20 @@ ge.execute('''
     for _, t in ipairs(TWINS) do
       if t.alive and t.active then
         t.staleN = math.max(0, (t.staleN or 0) - 1)
+        t.vjN = math.max(0, (t.vjN or 0) - 1)
         t.pos = { x = t.pos.x + t.vel.x * dt, y = t.pos.y + t.vel.y * dt, z = t.pos.z }
         local sp = math.sqrt(t.vel.x ^ 2 + t.vel.y ^ 2)
         local k = sp > 0 and math.max(0, sp - 2.0 * dt) / sp or 0
         t.vel = { x = t.vel.x * k, y = t.vel.y * k, z = 0 }
-        local tc = { x = t.pos.x + t.f.x * 0.0, y = t.pos.y + t.f.y * 0.0 }
+        local co = trot(t, { t.ctr[1], t.ctr[2], 0 })   -- (v2.83: a box's position is a corner)
+        local tc = { x = t.pos.x + co.x, y = t.pos.y + co.y }
         local dx, dy = tc.x - cx, tc.y - cy
         local ra, fa, rb, fb = { fy, -fx }, { fx, fy }, { t.f.y, -t.f.x }, { t.f.x, t.f.y }
         local sep = false
         for _, a in ipairs({ ra, fa, rb, fb }) do
           local dist = math.abs(dx * a[1] + dy * a[2])
           local r1 = 0.95 * math.abs(ra[1] * a[1] + ra[2] * a[2]) + 2.3 * math.abs(fa[1] * a[1] + fa[2] * a[2])
-          local r2 = 0.9 * math.abs(rb[1] * a[1] + rb[2] * a[2]) + 2.3 * math.abs(fb[1] * a[1] + fb[2] * a[2])
+          local r2 = t.hw * math.abs(rb[1] * a[1] + rb[2] * a[2]) + t.hl * math.abs(fb[1] * a[1] + fb[2] * a[2])
           if dist > r1 + r2 then sep = true end
         end
         if not sep and not t.hit and math.abs(t.pos.z - cz) < 3 then
@@ -504,7 +524,7 @@ ge.execute('''
           -- dented where BeamNG's car's front met it: the nodes within 1.2 m of that spot, 15 cm along the car's way
           local hx, hy = cx + fx * 2.3, cy + fy * 2.3
           local nd = 0
-          for c, l in ipairs(t.nodes) do
+          for c, l in ipairs(t.box and {} or t.nodes) do   -- (a box is rigid: no dents)
             local w = trot(t, l)
             if (t.pos.x + w.x - hx) ^ 2 + (t.pos.y + w.y - hy) ^ 2 < 1.44 then
               local r = { t.f.y, -t.f.x }
@@ -525,6 +545,7 @@ ge.execute('''
       return spawnTwin(model, o)
     end
     local v = o.config.vars
+    if tostring(o.vehicleName):match('^gtab_twin_') then return spawnTwin('gtab_prop', o, v) end   -- v2.83
     local gx, gy, gz = v['$gx'], v['$gy'], v['$gz']
     local L = { {-gx/2,-gy/2,0}, {gx/2,-gy/2,0}, {-gx/2,gy/2,0}, {gx/2,gy/2,0}, {-gx/2,-gy/2,gz}, {gx/2,-gy/2,gz}, {-gx/2,gy/2,gz}, {gx/2,gy/2,gz} }
     local pv = setmetatable({ id = 2000 + #PROPV, alive = true, opts = o, nodes = {}, pos = { x = o.pos.x, y = o.pos.y, z = o.pos.z },
@@ -567,6 +588,12 @@ def twinlog(m):
     ev.write('%.3f TWIN %s\n' % (st, m)); ev.flush()
 g.TWINLOG = twinlog
 g.TWIN_STALE = int(os.environ.get('FAKE_TWIN_STALE', '0'))
+# v2.83: FAKE_BOX_SIZE=<x>: a proxy box's nodes read x times as far apart as they are while it is measured; FAKE_TWIN_VJUMP=1: one
+# frame, 6 frames after a teleport, the twin's speed reads 9000 m/s (a guess at his v2.75 log's "thrown at the 2nd pose", NOT verified in BeamNG)
+g.BOX_SIZE = float(os.environ.get('FAKE_BOX_SIZE', '1'))
+g.BOX_DEFAULT = os.environ.get('FAKE_BOX_DEFAULT') == '1'
+g.BOX_MIDDLE = os.environ.get('FAKE_BOX_MIDDLE') == '1'   # v2.83: setPositionRotation places a box's bottom middle (the jbeam's origin), not its position (a corner)
+g.TWIN_VJUMP = int(os.environ.get('FAKE_TWIN_VJUMP', '0'))
 def proplog(name, anch, gx, gy, gz, gm):
     ev.write('%.3f PROPSPAWN %s anchored %s %.2f x %.2f x %.2f m %.0f kg\n' % (st, name, anch, gx, gy, gz, gm)); ev.flush()
 g.PROPLOG = proplog

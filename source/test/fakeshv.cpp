@@ -53,7 +53,7 @@ static bool   g_noMapFrame = false;
 // v2.82 (sandbox only, a guess at GTA, NOT its physics): FAKE_PSKICK_MS=<m/s>: the size of FAKE_PSKICK's crash (4); FAKE_TCVANISH=1:
 // the traffic car 9001 is removed when the car is teleported within 6 m of it after that crash, unless the two were set not to
 // collide this frame (SET_ENTITY_NO_COLLISION_ENTITY)
-static bool   g_passFrame = false;
+static bool   g_passFrame = false, g_passStep = false;   // (g_passStep: as it was in the physics step just done: v2.83)
 static int    g_noMapCalls = 0, g_mapSeg = -1, g_noCollPairs = 0;
 static double g_physT = 0;
 static double g_frameT = 0.016;  // v2.0: the real time between script ticks (like GTA's frame time)
@@ -648,6 +648,7 @@ void scriptWait(DWORD)
 		g_mapSeg = seg;
 	}
 	g_noMapFrame = false;
+	g_passStep = g_passFrame;
 	g_passFrame = false;
 	if (g_wSet && !g_frozen && dt > 0) {   // v2.77: M = Rot(w dt) M (Rodrigues), the columns kept orthonormal
 		const double wl = sqrt(g_w[0] * g_w[0] + g_w[1] * g_w[1] + g_w[2] * g_w[2]), a = wl * dt * g_timeScale;
@@ -866,7 +867,7 @@ PUINT64 nativeCall()
 		else if (FakeProp* fp = PropOf(int(g_args[0]))) RetV(0.0f, 0.0f, fp->pushed ? 5.0f : 0.0f);
 		else if (int(g_args[0]) == 100 && g_velSet) {   // v2.77: the car's own speed reads back (FAKE_PSKICK: one "crash")
 			double v[3] = { g_vel[0], g_vel[1], g_vel[2] };
-			if (Env("FAKE_PSKICK") && g_tcPlaced && !g_tcGone && !g_psKicked && hypot(g_pos[0] - g_tc[0], g_pos[1] - g_tc[1]) < 4.0) {
+			if (Env("FAKE_PSKICK") && g_tcPlaced && !g_tcGone && !g_psKicked && !g_passStep && hypot(g_pos[0] - g_tc[0], g_pos[1] - g_tc[1]) < 4.0) {   // (v2.83: not a pair set not to collide)
 				g_psKicked = true;
 				char   ke[16];
 				const double kick = GetEnvironmentVariableA("FAKE_PSKICK_MS", ke, sizeof ke) ? atof(ke) : 4.0;   // v2.82

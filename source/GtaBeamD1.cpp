@@ -116,7 +116,7 @@
 #include "carmodel.h"
 #include "shv.h"
 
-#define D1_VERSION "2.82"
+#define D1_VERSION "2.83"
 
 namespace
 {
@@ -604,6 +604,7 @@ namespace
 		float       psHitMs = 1.0f;           // PuppetHitMs: a speed change GTA made bigger than this (m/s) is a crash
 		// v2.81 (PuppetNoMap=0, PuppetSlowMoFix=0, CrashHurt=1 = exactly v2.77)
 		bool        psNoMap = false;          // PuppetNoMap: the hidden car ignores GTA's map (walls, kerbs, ground) and BeamNG's solid posts: BeamNG alone hits them
+		int         trafficProxies = 0;       // TrafficProxies: (v2.83) boxes in BeamNG that take a GTA car's place for a crash while PuppetSolid is on (0: v2.82)
 		bool        psPassCar = false;        // PuppetPassCar: (v2.82) teleported into the GTA car it just hit: it doesn't collide with that car until they're apart
 		bool        psSlowFix = false;        // PuppetSlowMoFix: (v2.78) GTA in slow motion: the hidden car's speed scaled so it keeps up with BeamNG's car
 		bool        crashHurt = true;         // CrashHurt: (v2.78) crashes hurt you; Ctrl+F9 switches it in game
@@ -1033,6 +1034,7 @@ namespace
 			c.psNoMap = GetPrivateProfileIntA(kSec, "PuppetNoMap", 0, path) != 0;  // v2.81
 			c.psSlowFix = GetPrivateProfileIntA(kSec, "PuppetSlowMoFix", 0, path) != 0;
 			c.psPassCar = GetPrivateProfileIntA(kSec, "PuppetPassCar", 0, path) != 0;  // v2.82
+			c.trafficProxies = std::clamp(int(GetPrivateProfileIntA(kSec, "TrafficProxies", 0, path)), 0, 8);  // v2.83
 			c.crashHurt = GetPrivateProfileIntA(kSec, "CrashHurt", 1, path) != 0;
 			Log("settings: v2.77: PuppetSolid %d%s (gain %.1f/s level, %.1f/s up/down, %.1f/s turn; snap past %.1f m; a crash = GTA changed its speed > %.1f m/s)", int(c.puppetSolid),
 				c.puppetSolid ? ": GTA's hidden car is solid, moved by its speed; the scripted traffic / people / prop reactions are off" : " (v2.76: the hidden car is a ghost)",
@@ -1044,6 +1046,10 @@ namespace
 			Log("settings: v2.82: PuppetPassCar %d%s", int(c.psPassCar),
 				c.psPassCar ? (c.puppetSolid ? " (teleported into the GTA car it just hit, the hidden car doesn't collide with that car until the two are apart)" : " (does nothing: needs PuppetSolid=1)")
 				            : " (v2.81: the hidden car is teleported solid into the GTA car it just hit)");
+			Log("settings: v2.83: TrafficProxies %d%s", c.trafficProxies,
+				c.trafficProxies == 0 ? " (v2.82: GTA resolves every crash with its cars)"
+				: c.puppetSolid       ? " (boxes in BeamNG: a GTA car about to meet yours gets one, BeamNG resolves that crash, GTA's car copies its box, the hidden car ignores that GTA car)"
+				                      : " (does nothing: needs PuppetSolid=1)");
 			Log("settings: v2.5: ground rays %.1f m up / %.1f m down from the level; walls %d (scan %.2f m up, lines %.2f m apart, %.2f ms a frame); props %d "
 			    "(within %.0f m, push x%.2f, bump x%.2f, big ones solid %d); dents %d (%.0f a second); BeamNG gravity x%.2f while GTA drives",
 				c.worldUpM, c.worldDownM, int(c.worldWalls), c.worldWallProbeM, c.worldWallStepM, c.worldWallMs, int(c.props), c.propRangeM, c.propPush, c.propBump,
@@ -2061,6 +2067,7 @@ namespace
 		int      hb = 0, flt = 0;
 		// v2.01: your BeamNG controls
 		std::string inpHow;            // from drive_ok: "binds", "binds+fallback", "fallback"
+		std::string modV;              // v2.83: the BeamNG mod's version (drive_ok)
 		std::string fb;                // the parts BeamNG takes as plain values (thr, str, hb) instead of your bindings
 		bool     padKnown = false;     // drive_ok listed the pad controls your bindings use
 		bool     padBound[kPadCtls] = {};
@@ -10439,7 +10446,9 @@ namespace
   "twinLeadS": 0.5,
   "twinDentScale": 1.0,
   "twinDentMaxM": 0.35,
-  "twinStillS": 2.0
+  "twinStillS": 2.0,
+  "proxyAbout": "v2.83 (TrafficProxies in the ini: how many): boxes in BeamNG that take a GTA car's place just before it meets yours while PuppetSolid is on, so BeamNG resolves that crash and your car really crumples. Each entry: box:width:length:height:kg (m). The GTA car gets the free box closest to it in length. twinLeadS, twinStillS and TwinMaxLengthM are used for them too.",
+  "proxyPool": ["box:1.9:4.7:1.45:1500", "box:1.8:4.1:1.45:1250", "box:2.05:5.2:1.8:2200", "box:1.9:4.7:1.45:1500"]
 }
 )JSON";
 	struct TrafficState
@@ -10468,6 +10477,10 @@ namespace
 			uint32_t    poses = 0;
 			uint32_t    stale = 0;  // v2.75: poses skipped before the twin reached GTA's car (BeamNG's teleport not taken yet)
 			std::map<int, double> applied;  // its dents given to GTA's car (by 0.5 m cell)
+			// v2.83 TrafficProxies (a box): when its first pose came, poses not taken while it settled, BeamNG's car hit it
+			double      tFirst = 0, hitT = 0, hitDv = 0;
+			uint32_t    settle = 0;
+			bool        hit = false, meet = false;  // meet: its GTA car's box and BeamNG's car's touch now, or will within twinLeadS
 			// v2.74: its poses (GTA's world) on BeamNG's clock: drawn at the same moment as your car (your v2.73 test: twinned cars
 			// "get the old camera lag glitch": each pose was set as it came in, then GTA moved the car on, then the next one snapped it back)
 			struct Pose
@@ -10479,8 +10492,9 @@ namespace
 		std::vector<Twin>       twins;
 		bool                    twAsked = false;
 		double                  twAskT = 0;
-		std::string             twPool[8], twFb[3];
-		int                     twPoolN = 0, twFbN = 0;
+		std::string             twPool[8], twFb[3], pxPool[8];
+		int                     twPoolN = 0, twFbN = 0, pxPoolN = 0;
+		uint32_t                pxHits = 0, pxSettle = 0;  // (10 s)
 		double                  twLead = 0.5, twStill = 2.0, twDentScale = 1.0, twDentMax = 0.35;
 		struct GtaDent
 		{
@@ -10568,6 +10582,8 @@ namespace
 		num("twinDentScale", T.twDentScale, 0, 5);
 		num("twinDentMaxM", T.twDentMax, 0.02, 1.0);
 		num("twinStillS", T.twStill, 0.5, 20);
+		T.pxPoolN = std::max(0, JsonStrs(js, "proxyPool", T.pxPool, 8));  // v2.83 (an older file without them: the built-in boxes)
+		if (T.pxPoolN == 0) T.pxPoolN = std::max(0, JsonStrs(kTrafficDefault, "proxyPool", T.pxPool, 8));
 		T.cfgLoaded = true;
 		Log("traffic (v2.7): %s; range %.0f m, BeamNG's car taken as %.0f kg, pushes x%.1f (GTA) / x%.1f (BeamNG), dents %.1f mm per m/s (max %.0f mm)%s", T.cfgSource.c_str(), T.rangeM,
 			T.beamMass, T.pushGta, T.pushBeam, T.dentPerMs * 1000, T.dentMax * 1000, g_cfg.trafficCollision ? "" : "; TrafficCollision=0: off");
@@ -10581,6 +10597,14 @@ namespace
 	// tick and gets GTA's damage where the twin is dented. Standing still for twinStillS, far, gone or 30 s on: back to GTA.
 	// A GTA car with no twin free gets v2.7's push.
 	// ---------------------------------------------------------------------------------------
+	// v2.83 TrafficProxies: the twins are boxes and work with PuppetSolid (the hidden car ignores a GTA car that has one)
+	inline bool PxOn() { return g_cfg.puppetSolid && g_cfg.trafficProxies > 0; }
+	inline bool PxHas(const TrafficState& T, int e)
+	{
+		for (const auto& tw : T.twins)
+			if (tw.state == 2 && tw.ent == e) return true;
+		return false;
+	}
 	void TwinRelease(TrafficState& T, int k, const char* why)
 	{
 		TrafficState::Twin& tw = T.twins[k];
@@ -10593,8 +10617,16 @@ namespace
 			int h = tw.ent;
 			CallVoid(N::SET_VEHICLE_AS_NO_LONGER_NEEDED, &h);
 		}
-		T.twDone[tw.ent] = NowSeconds() + (tw.dmax < 0.01 ? 4.0 : 0.0);  // (not twinned again for 2 s; 6 s after a twin with no crash)
-		if (T.logs++ < 80)
+		const bool px = PxOn();
+		const bool crashed = px ? tw.hit : tw.dmax >= 0.01;
+		T.twDone[tw.ent] = NowSeconds() + (crashed || px ? 0.0 : 4.0);  // (not twinned again for 2 s; a BeamNG car twin with no crash: 6 s)
+		if (px) {
+			if (T.logs++ < 200)
+				Log("proxy (v2.83): GTA car %d back to GTA (%s) after %.1f s: its box %d %s; %u poses copied to GTA's car, %u not taken while the box settled; GTA's car exists %d", tw.ent,
+					why, NowSeconds() - tw.tA, k + 1,
+					tw.hit ? (std::string("was hit by BeamNG's car (its speed changed ") + std::to_string(int(tw.hitDv * 3.6 + 0.5)) + " km/h in all)").c_str() : "was not hit", tw.poses,
+					tw.settle, tw.ent ? Call<int>(N::DOES_ENTITY_EXIST, tw.ent) : 0);
+		} else if (T.logs++ < 80)
 			Log("traffic twins: GTA car %d back to GTA (%s; after %.1f s, %u poses copied, its twin dented up to %.0f mm)", tw.ent, why, NowSeconds() - tw.tA, tw.poses, tw.dmax * 1000);
 		tw.state = 1;
 		tw.ent = 0;
@@ -10603,6 +10635,9 @@ namespace
 		tw.applied.clear();
 		tw.dmax = tw.tStill = 0;
 		tw.poses = tw.stale = 0;
+		tw.tFirst = tw.hitT = tw.hitDv = 0;
+		tw.settle = 0;
+		tw.hit = tw.meet = false;
 		++T.twRel;
 	}
 	void TwinsEnd(TrafficState& T, const char* why)
@@ -10616,18 +10651,31 @@ namespace
 	// between drives: only the first F10 of a BeamNG session waits.
 	void TwinsAsk(TrafficState& T)
 	{
-		if (T.twAsked || !g_cfg.trafficCollision || g_cfg.trafficTwins <= 0 || g_cfg.trafficMode != 0 || g_cfg.puppetSolid) return;  // (v2.77: no twins)
+		const bool px = PxOn();  // v2.83: boxes, with PuppetSolid
+		if (T.twAsked || (!px && (!g_cfg.trafficCollision || g_cfg.trafficTwins <= 0 || g_cfg.trafficMode != 0 || g_cfg.puppetSolid))) return;  // (v2.77: no twins)
+		if (px && g_drv.modV < std::string("2.83")) {  // (an older mod would take "box:..." for a BeamNG car's name)
+			static bool said = false;
+			if (!said) {
+				said = true;
+				const char* v = g_drv.modV.empty() ? "?" : g_drv.modV.c_str();
+				Log("proxy (v2.83): the BeamNG mod is %s, not 2.83: NO boxes (GTA's own crash, as v2.82). Copy the 2.83 gtaBridge.lua and restart BeamNG", v);
+				Notify("BeamNG mod %s is old: the traffic boxes need 2.83 (restart BeamNG)", v);
+			}
+			return;
+		}
 		if (!T.cfgLoaded) LoadTraffic();
-		if (T.twPoolN <= 0) return;
+		const std::string* pool = px ? T.pxPool : T.twPool;
+		const int          poolN = px ? T.pxPoolN : T.twPoolN, n = px ? g_cfg.trafficProxies : g_cfg.trafficTwins;
+		if (poolN <= 0) return;
 		T.twAsked = true;
 		T.twAskT = NowSeconds();
-		T.twins.assign(size_t(g_cfg.trafficTwins), TrafficState::Twin{});
+		T.twins.assign(size_t(n), TrafficState::Twin{});
 		std::string m = "{\"t\":\"twp\",\"m\":[", fb;
-		for (int k = 0; k < g_cfg.trafficTwins; ++k) m += std::string(k ? "," : "") + "\"" + T.twPool[k % T.twPoolN] + "\"";
-		for (int k = 0; k < T.twFbN; ++k) fb += std::string(k ? "," : "") + "\"" + T.twFb[k] + "\"";
+		for (int k = 0; k < n; ++k) m += std::string(k ? "," : "") + "\"" + pool[k % poolN] + "\"";
+		for (int k = 0; k < T.twFbN && !px; ++k) fb += std::string(k ? "," : "") + "\"" + T.twFb[k] + "\"";  // (boxes: no BeamNG car instead)
 		m += "],\"fb\":[" + fb + "]}";
 		DrvSend(m.c_str());
-		Log("traffic twins: asked BeamNG for %d twins (%s)", g_cfg.trafficTwins, m.c_str());
+		Log("%s: asked BeamNG for %d %s (%s)", px ? "proxy (v2.83)" : "traffic twins", n, px ? "boxes" : "twins", m.c_str());
 	}
 	void TwinsMsgs(TrafficState& T);
 	// still being spawned (the start waits for them, at most 25 s)
@@ -10750,6 +10798,7 @@ namespace
 	}
 
 	// BeamNG's answers: ready ("twi"), poses ("twu": the last one per twin is copied), dents ("twd"), a failed put ("twf")
+	void PxHitLog(TrafficState& T, int k);  // (v2.83: with the contact log, below)
 	void TwinsMsgs(TrafficState& T)
 	{
 		std::vector<std::string> q;
@@ -10807,6 +10856,7 @@ namespace
 							continue;
 						}
 						if (T.logs++ < 80) Log("traffic twins (v2.75): twin %d's first pose taken %.1f m from GTA car %d (%u old poses skipped before it)", k + 1, off, tw.ent, tw.stale);
+						tw.tFirst = now;
 					}
 					// v2.74: thrown (BeamNG tore it loose, your v2.73 test: cars "disappear when I hit them from the side or touch them too long"):
 					// not copied, back to GTA where it is
@@ -10815,9 +10865,39 @@ namespace
 						const double sp0 = sqrt(Dot3(b.V, b.V)), sp1 = sqrt(Dot3(q.V, q.V));
 						const double jump = sqrt((q.P[0] - b.P[0]) * (q.P[0] - b.P[0]) + (q.P[1] - b.P[1]) * (q.P[1] - b.P[1]) + (q.P[2] - b.P[2]) * (q.P[2] - b.P[2]));
 						if (sp1 > std::max(40.0, sp0 * 1.5 + 15.0) || jump > 8.0) {
+							// v2.83: his v2.75 log: 23 of 27 twins "thrown" at their 2nd pose, 0.0 s after a first one right at GTA's car: BeamNG's
+							// reading just after the teleport (UNVERIFIED which: the numbers are logged now). A box's odd poses in its first 0.4 s
+							// are not taken and don't throw it
+							if (PxOn() && now - tw.tFirst < 0.4) {
+								++tw.settle;
+								++T.pxSettle;
+								if (T.logs++ < 200)
+									Log("proxy (v2.83): box %d's pose not taken %.2f s after its first (BeamNG still settling it): %.0f km/h after %.0f, %.1f m from the last pose", k + 1,
+										now - tw.tFirst, sp1 * 3.6, sp0 * 3.6, jump);
+								continue;
+							}
 							++T.twThrown;
+							if (PxOn() && T.logs++ < 200)
+								Log("proxy (v2.83): box %d THROWN in BeamNG %.2f s after its first pose: %.0f km/h after %.0f, %.1f m from the last pose: not copied", k + 1, now - tw.tFirst,
+									sp1 * 3.6, sp0 * 3.6, jump);
 							TwinRelease(T, k, "its twin was thrown in BeamNG: not copied");
 							continue;
+						}
+						// v2.83: BeamNG's car hit the box: its level speed changed more than sliding on the ground can (7 m/s2), 0.3 m/s in all
+						// (not in its first 0.25 s: it is given its speed and lands then)
+						if (PxOn() && now - tw.tFirst > 0.25) {
+							const double dvl = hypot(q.V[0] - b.V[0], q.V[1] - b.V[1]), dts = q.st - b.st;
+							const double exc = dts > 0.0005 && dts < 0.2 ? dvl - 7.0 * dts : 0.0;
+							if (exc > 0) {
+								if (now - tw.hitT > 0.25 && !tw.hit) tw.hitDv = 0;  // (an old wobble doesn't count towards it)
+								tw.hitT = now;
+								tw.hitDv += exc;
+								if (!tw.hit && tw.hitDv > 0.3) {
+									tw.hit = true;
+									++T.pxHits;
+									PxHitLog(T, k);
+								}
+							}
 						}
 					}
 					if (!tw.hist.empty() && q.st <= tw.hist.back().st) tw.hist.clear();  // (BeamNG's clock went back: a reset)
@@ -10837,14 +10917,15 @@ namespace
 					tw.l = JsonNum(s, "l", 0);
 					tw.h = JsonNum(s, "h", 0);
 					if (tw.state == 0) tw.state = 1;
-					Log("traffic twins: twin %d ready: a %s (%.1f x %.1f x %.1f m)", k + 1, tw.model.c_str(), tw.w, tw.l, tw.h);
+					Log("%s %d ready: a %s (%.2f x %.2f x %.2f m)", PxOn() ? "proxy (v2.83): box" : "traffic twins: twin", k + 1, tw.model.c_str(), tw.w, tw.l, tw.h);
 				} else {
 					std::string why;
 					JsonStr(s, "why", why);
 					if (tw.state == 2) TwinRelease(T, k, "failed");
 					tw.state = -1;
 					++T.twFails;
-					Log("traffic twins: twin %d failed in BeamNG (%s): GTA cars get v2.7's push instead", k + 1, why.c_str());
+					Log("%s %d failed in BeamNG (%s): GTA cars get %s instead", PxOn() ? "proxy (v2.83): box" : "traffic twins: twin", k + 1, why.c_str(),
+						PxOn() ? "GTA's own crash (v2.82)" : "v2.7's push");
 				}
 			} else if (ty == "twf") {
 				std::string why;
@@ -10991,7 +11072,9 @@ namespace
 			}
 		}
 		// v2.77 PuppetSolid: GTA's physics does it all (PsTick reads nearV / nearP); none of the plugin's own reactions
-		if (g_cfg.puppetSolid) return;
+		// v2.83 TrafficProxies: but a GTA car about to meet the car gets a box in BeamNG (the twins' code below; no push, no people)
+		const bool px = PxOn();
+		if (g_cfg.puppetSolid && (!px || T.twins.empty())) return;
 		const double w = std::max(1.0f, g_modelSize[0].load()), l = std::max(2.0f, g_modelSize[1].load()), h = std::max(0.8f, g_modelSize[2].load());
 		const double cc[3] = { d.carO[0] + d.carU[0] * h * 0.5, d.carO[1] + d.carU[1] * h * 0.5, d.carO[2] + h * 0.5 };
 		// the drawn car's surface towards a direction (flat), for the dent and GTA's damage
@@ -11042,13 +11125,13 @@ namespace
 			// (v2.75: they get v2.7's push); show cars are never twinned or taken away
 			const bool big = 2.0 * he[1] > g_cfg.twinMaxLen;
 			const bool show = g_showVeh.count(e) != 0;
-			if (g_cfg.trafficMode == 2) {
+			if (!px && g_cfg.trafficMode == 2) {
 				double n[2], vn = 0;
 				NVec3  ve{};
 				if (!show && touching(e, c, ax, he, n, vn, ve)) TrafficDespawn(T, e, me);
 				continue;
 			}
-			if (!T.twins.empty() && g_cfg.trafficMode == 0 && !big && !show) {
+			if (!T.twins.empty() && (px ? !d.foot : g_cfg.trafficMode == 0) && !big && !show) {  // (v2.83: no boxes while you're on foot: the hidden car stands frozen)
 				// v2.71: about to meet the car (their boxes, 15 cm bigger (v2.73; was 25), at their speeds within twinLeadS) and not too high or
 				// low: a twin. v2.73: your v2.72 test, "random forces as I pass": most twins "didn't meet" (seen 1 s ahead with 25 cm to spare,
 				// the cars only passed close); for those 0.8 s GTA's car was BeamNG's coasting twin (no driver), then let go
@@ -11077,7 +11160,8 @@ namespace
 				int twK = -1;
 				for (size_t k = 0; k < T.twins.size(); ++k)
 					if (T.twins[k].state == 2 && T.twins[k].ent == e) twK = int(k);
-				if (twK >= 0 && meetT < 0 && T.twins[twK].dmax < 0.01 && now - T.twins[twK].tA > T.twLead + 0.3) TwinRelease(T, twK, "they didn't meet");
+				if (twK >= 0) T.twins[twK].meet = meetT >= 0;  // v2.83
+				if (twK >= 0 && meetT < 0 && (px ? !T.twins[twK].hit : T.twins[twK].dmax < 0.01) && now - T.twins[twK].tA > T.twLead + 0.3) TwinRelease(T, twK, "they didn't meet");
 				auto dn = T.twDone.find(e);
 				if (twK >= 0 || (dn != T.twDone.end() && now - dn->second < 2.0)) continue;
 				int best = -1;
@@ -11100,7 +11184,9 @@ namespace
 						clash = FlatBoxes(oc, ro, fo, o.w * 0.5 + 0.05, o.l * 0.5 + 0.05, cb0, rb, fb, hw, hl);
 					}
 					if (clash) {
-						if (T.logs++ < 80) Log("traffic twins: GTA car %d is already too close for its twin to fit (%s): v2.7's push for it", e, T.twins[best].model.c_str());
+						if (T.logs++ < 80)
+							Log("%s: GTA car %d is already too close for its %s to fit (%s): %s for it", px ? "proxy (v2.83)" : "traffic twins", e, px ? "box" : "twin", T.twins[best].model.c_str(),
+								px ? "GTA's own crash (v2.82)" : "v2.7's push");
 						T.twDone[e] = now + 3.0;
 						best = -1;
 					}
@@ -11123,6 +11209,7 @@ namespace
 					CallVoid(N::SET_ENTITY_AS_MISSION_ENTITY, e, 0, 1);  // (GTA doesn't take it away while BeamNG has it)
 					tw.state = 2;
 					tw.ent = e;
+					tw.meet = true;
 					tw.hist.clear();
 					tw.tA = now;
 					tw.tPose = tw.tStill = tw.dmax = 0;
@@ -11135,12 +11222,13 @@ namespace
 					tw.gl = mx.y - mn.y;
 					tw.gh = mx.z - mn.z;
 					++T.twActs;
-					if (T.logs++ < 80)
-						Log("traffic twins: GTA car %d (class %d, %.1f m long, %.0f km/h%s) meets the car in %.2f s: twin %d (%s, %.1f m) takes its place", e, cls, tw.gl, spd * 3.6,
-							pk ? ", parked" : "", meetT, best + 1, tw.model.c_str(), tw.l);
+					if (T.logs++ < (px ? 200u : 80u))
+						Log("%s: GTA car %d (class %d, %.1f m long, %.0f km/h%s) meets the car in %.2f s: %s %d (%s, %.1f m) takes its place", px ? "proxy (v2.83)" : "traffic twins", e, cls,
+							tw.gl, spd * 3.6, pk ? ", parked" : "", meetT, px ? "box" : "twin", best + 1, tw.model.c_str(), tw.l);
 					continue;
 				}
 			}
+			if (px) continue;  // (v2.83: no box for it: GTA's own crash on the solid hidden car, as v2.82)
 			double n[2], vn = 0;
 			NVec3  ve{};
 			if (!touching(e, c, ax, he, n, vn, ve)) continue;
@@ -11197,14 +11285,14 @@ namespace
 			if (!alive) why = "GTA's car is gone";
 			else if (now - tw.tA > 1.0 && (tw.tPose == 0 || now - tw.tPose > 1.0)) why = tw.stale ? "its twin never reached GTA's car in BeamNG" : "no poses from BeamNG";
 			else if (dist > 45.0) why = "far from your car";
-			else if (tw.tStill > 0 && now - tw.tStill > T.twStill) why = "standing still";
-			else if (tw.dmax < 0.01 && now - tw.tA > 2.0 && dist > 10.0) why = "no crash";
-			else if (now - tw.tA > 30.0) why = "30 s";
+			else if (tw.tStill > 0 && now - tw.tStill > T.twStill && !(px && tw.meet && !d.foot)) why = "standing still";  // (v2.83: not while BeamNG's car is at it: no overlap when GTA's collision returns)
+			else if ((px ? !tw.hit : tw.dmax < 0.01) && now - tw.tA > 2.0 && dist > 10.0) why = "no crash";
+			else if (now - tw.tA > 30.0 && !(px && tw.meet && !d.foot)) why = "30 s";
 			if (why) TwinRelease(T, int(k), why);
 		}
 		for (auto it = T.twDone.begin(); it != T.twDone.end();) it = now - it->second > 5.0 ? T.twDone.erase(it) : std::next(it);
 		// people: only by a moving car (on foot the parked car is solid in GTA: people walk around it)
-		for (int e : (d.foot || sqrt(d.carV[0] * d.carV[0] + d.carV[1] * d.carV[1]) < 2.0) ? std::vector<int>{} : T.nearP) {
+		for (int e : (px || d.foot || sqrt(d.carV[0] * d.carV[0] + d.carV[1] * d.carV[1]) < 2.0) ? std::vector<int>{} : T.nearP) {
 			if (!Call<int>(N::DOES_ENTITY_EXIST, e) || Call<int>(N::IS_PED_DEAD_OR_DYING, e, 1)) continue;
 			const NVec3  p = Call<NVec3>(N::GET_ENTITY_COORDS, e, 0);
 			const double c[3] = { p.x, p.y, p.z }, ax[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } }, he[3] = { 0.3, 0.3, 0.9 };
@@ -11250,7 +11338,7 @@ namespace
 		// happened, so they stood or walked on inside the drawn car (GTA's hidden car has no collision). Like SkyCraft's NPCs at
 		// Minecraft's blocks: anyone standing inside it is moved out sideways, every tick (they slide along it)
 		const double carSp = sqrt(d.carV[0] * d.carV[0] + d.carV[1] * d.carV[1]);
-		for (int e : d.foot ? std::vector<int>{} : T.nearP) {
+		for (int e : (px || d.foot) ? std::vector<int>{} : T.nearP) {
 			if (!Call<int>(N::DOES_ENTITY_EXIST, e) || Call<int>(N::IS_PED_DEAD_OR_DYING, e, 1) || Call<int>(N::IS_PED_RAGDOLL, e)) continue;
 			const NVec3 p = Call<NVec3>(N::GET_ENTITY_COORDS, e, 0);
 			PropLive    L;
@@ -11269,14 +11357,20 @@ namespace
 			if (T.pedOut++ < 10) Log("traffic (v2.75): a person inside the drawn car (you at %.0f km/h): moved out beside it", carSp * 3.6);
 		}
 		if (now - T.logT > 10.0) {
-			if (T.carHits + T.pedHits > 0 || T.logT == 0)
+			if (!px && (T.carHits + T.pedHits > 0 || T.logT == 0))
 				Log("traffic: 10 s: %zu cars and %zu people near, %u car hits (BeamNG's car pushed %.1f km/h in all), %u people hit, %u riders knocked off", T.nearV.size(), T.nearP.size(),
 					T.carHits, T.dvSum * 3.6, T.pedHits, T.riders);
-			if (T.despawned || T.logT == 0)
+			if (!px && (T.despawned || T.logT == 0))
 				Log("traffic (v2.75): mode %s, %u cars taken away (despawn)", g_cfg.trafficMode == 2 ? "despawn" : g_cfg.trafficMode == 1 ? "push" : "twins (semis and buses: push)",
 					T.despawned);
 			T.despawned = 0;
-			if (T.twActs + T.twRel + T.twFails > 0) {
+			if (px) {
+				int ready = 0, on = 0;
+				for (const auto& tw : T.twins) ready += tw.state == 1, on += tw.state == 2;
+				Log("proxy (v2.83): 10 s: TrafficProxies ON: %u GTA cars got a box, %u hit by BeamNG's car, %u back to GTA (%u thrown), %u poses copied, %u not taken while settling, %u "
+				    "failed; now %d boxes ready, %d on GTA cars, %zu GTA cars near", T.twActs, T.pxHits, T.twRel, T.twThrown, T.twPoses, T.pxSettle, T.twFails, ready, on, T.nearV.size());
+				T.twActs = T.twRel = T.twPoses = T.twDents = T.twFails = T.twThrown = T.pxHits = T.pxSettle = 0;
+			} else if (T.twActs + T.twRel + T.twFails > 0) {
 				int ready = 0, on = 0;
 				for (const auto& tw : T.twins) ready += tw.state == 1, on += tw.state == 2;
 				Log("traffic twins: 10 s: %u GTA cars got a twin, %u back to GTA (%u thrown by BeamNG: not copied), %u poses copied, %u dents given to GTA's cars, %u failed; now %d ready, %d on GTA cars",
@@ -11719,6 +11813,7 @@ namespace
 		d.eyeOk = JsonNums(reply.c_str(), "eye", d.eyeB, 3) == 3;  // v2.71: BeamNG's driver camera
 		std::string ver;
 		JsonStr(reply, "v", ver);
+		d.modV = ver;
 		d.nwB = std::max(0, JsonStrs(reply, "wheels", d.nameB, kDrvWheels));
 		std::string spinHow;
 		JsonStr(reply, "spin", spinHow);
@@ -12409,6 +12504,9 @@ namespace
 		};
 		std::vector<Hit> hits;
 		uint32_t         hitLines = 0, passes = 0, hitStay = 0, hitGone = 0;  // (session)
+		// v2.83 TrafficProxies
+		double           lastEl = 0;                  // the hidden car's distance from BeamNG's car, last tick
+		uint32_t         pxConflicts = 0, pxLogs = 0; // GTA changed the hidden car's speed at a GTA car that has a box (session)
 	} g_ps;
 	const char* kVehClassName[23] = { "compact", "sedan", "SUV", "coupe", "muscle", "sports classic", "sports", "super", "motorcycle", "off-road", "industrial",
 		                              "utility", "van", "cycle", "boat", "helicopter", "plane", "service", "emergency", "military", "commercial", "train", "open wheel" };
@@ -12607,7 +12705,7 @@ namespace
 			out.push_back(q);
 		};
 		for (int e : T.nearV) {
-			if (e == veh || !Call<int>(N::DOES_ENTITY_EXIST, e)) continue;
+			if (e == veh || !Call<int>(N::DOES_ENTITY_EXIST, e) || PxHas(T, e)) continue;  // (v2.83: one with a box in BeamNG: BeamNG's contact)
 			const uint32_t model = uint32_t(Call<int>(N::GET_ENTITY_MODEL, e));
 			NVec3          mn{}, mx{}, fw{}, rt{}, up{}, ps{};
 			CallVoid(N::GET_MODEL_DIMENSIONS, model, &mn, &mx);
@@ -12687,6 +12785,20 @@ namespace
 		S.bend.most = g_dent.mostNow;
 		S.bend.moved = g_dent.any ? g_dent.movedNow : 0;
 		S.bend.what = what;
+	}
+	// v2.83 TrafficProxies: BeamNG's car hit a GTA car's box (TwinsMsgs saw the box's speed change): the contact log, and the bend check
+	void PxHitLog(TrafficState& T, int k)
+	{
+		PuppetSolidState&         S = g_ps;
+		const TrafficState::Twin& tw = T.twins[k];
+		const double              now = NowSeconds();
+		char                      what[64];
+		snprintf(what, sizeof(what), "a GTA car (BeamNG's box %d)", k + 1);
+		++S.contactsBeam;
+		if (S.contactLogs++ < 120)
+			Log("contact (v2.83): a GTA car (%d, %.1f m long) at %.0f km/h: resolved by BeamNG (its box %d, a %s, put there %.2f s before); GTA's car copies the box, the hidden car "
+			    "ignores that GTA car; the hidden car %.2f m from BeamNG's car", tw.ent, tw.gl, PsLen(g_drv.carV) * 3.6, k + 1, tw.model.c_str(), now - tw.tA, S.lastEl);
+		PsBendStart(what, now);
 	}
 	void PsBendTick(double now, double el)
 	{
@@ -12835,6 +12947,10 @@ namespace
 		// who touches it (GTA's own contact), for the log and the crash
 		std::vector<PsNear> nr;
 		PsNearAt(nr, P, Mc, S.haveSet ? base : Vr);
+		S.lastEl = el;
+		// v2.83 TrafficProxies: a GTA car that has a box in BeamNG: BeamNG resolves that contact, the hidden car doesn't collide with it
+		for (const auto& tw : T.twins)
+			if (tw.state == 2 && tw.ent && Call<int>(N::DOES_ENTITY_EXIST, tw.ent)) PsPass(veh, tw.ent);
 		// v2.82 PuppetPassCar: the car it was teleported into: no collision with it for 1 s and until the two are apart
 		for (PuppetSolidState::Hit& h : S.hits) {
 			if (!h.pass || !Call<int>(N::DOES_ENTITY_EXIST, h.e)) continue;
@@ -12870,7 +12986,20 @@ namespace
 			for (const PsNear& q : nr)
 				if (!best || (q.touching && !best->touching) || (q.touching == best->touching && q.vn > best->vn)) best = &q;
 			const double spd = PsLen(base);
-			if (!best) {
+			int    pxE = 0;  // v2.83: the nearest GTA car that has a box, within 6 m
+			double pxD = 6.0;
+			for (const auto& tw : T.twins) {
+				if (best || tw.state != 2 || !tw.ent || !Call<int>(N::DOES_ENTITY_EXIST, tw.ent)) continue;
+				const NVec3  tp = Call<NVec3>(N::GET_ENTITY_COORDS, tw.ent, 0);
+				const double dd = hypot(tp.x - P[0], tp.y - P[1]);
+				if (dd < pxD) pxD = dd, pxE = tw.ent;
+			}
+			if (pxE) {
+				++S.pxConflicts;
+				if (S.pxLogs++ < 30)
+					Log("proxy (v2.83): CONFLICT: GTA changed the hidden car's speed by %.1f km/h (level) with GTA car %d, which has a box, %.1f m away: BOTH games resolved it (the "
+					    "no-collision call didn't hold); not sent to BeamNG; the hidden car %.2f m from BeamNG's car (conflict %u this session)", dvh * 3.6, pxE, pxD, el, S.pxConflicts);
+			} else if (!best) {
 				++S.hitMap;
 				S.mapDvMax = std::max(S.mapDvMax, dvh);
 				if (S.mapLogs++ < 30) {
