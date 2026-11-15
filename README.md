@@ -8,6 +8,7 @@ GTA V runs the world, the walking and the guns. BeamNG.drive runs the car. Both 
 
 ## Quick start (5 minutes)
 1. **Download** `GTA_X_BEAM_v2.77.zip` from [Releases](https://github.com/Treto420/GTANG/releases/latest) (not the green **Code** button: that's the source code) and unzip it.
+   - For **2.83** (newer than that release): use the green **Code** button, **Download ZIP**, and take the `GTA` and `BeamNG` folders from it.
 2. **GTA V files:** copy everything in the `GTA` folder into your GTA V folder (the one with `GTA5.exe`).
 3. **BeamNG mod:** copy the `BeamNG\gtabridge` folder into `%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\mods\unpacked\` (paste that path into Explorer's address bar). Say yes to replacing files.
 4. **Start BeamNG first.** Load the level **Grid, Small, Pure** and spawn your car.
@@ -47,13 +48,15 @@ Driving uses your own BeamNG controls and bindings (gears, clutch, drive modes).
 - **Your BeamNG car in GTA,** drawn with its paint, materials, glass and lights, in GTA's light, shadows and reflections.
 - **BeamNG's physics.** GTA's streets, hills, walls and ground surfaces are built in BeamNG, so the car grips, crumples and breaks the BeamNG way. Since 2.81 (`PuppetNoMap=1`) only BeamNG meets walls, kerbs and solid posts, so slow wall hits bend the bumper too.
 - **GTA's world reacts the vanilla way** (`PuppetSolid=1`, new in 2.77). GTA's cars get pushed and dented, people ragdoll, lamp posts break and bins fly, and your BeamNG car takes the hit.
+- **Traffic crashes crumple your car** (`TrafficProxies=4`, new in 2.83). A GTA car about to meet yours gets a box in BeamNG at its place, with a car's size and weight. BeamNG resolves that crash, so your car really hits something, and GTA's car is shoved the way its box was.
 - **Real damage on the car.** BeamNG's dents, broken glass, lost bumpers and wheels show in GTA.
 - **GTA's guns.** Bullets dent the car, leave holes, pop tyres and break windows. Explosions push it and set it on fire; a car that blows up becomes a charred wreck.
 - **On foot.** Get out, walk around the car, shoot it. Get back in and keep driving.
 - **Show cars** (Ctrl+Shift+F11), **pause sync** (pausing one game pauses the other), **BeamNG's engine sound** and GTA's radio on the phone.
 
 ## Known issues
-- Things react to GTA's hidden car, not the exact shape of your BeamNG car (see Tips). The parts of your BeamNG car that stick out past the GTA car crumple against walls BeamNG's way; GTA's cars, people and signs push your car and dent it at the contact point.
+- Things react to GTA's hidden car, not the exact shape of your BeamNG car (see Tips). The parts of your BeamNG car that stick out past the GTA car crumple against walls BeamNG's way; GTA's people and signs push your car and dent it at the contact point.
+- Traffic (2.83): the box in BeamNG is a hard block, so hits are harsher than car on car, and the GTA car you hit shows no dent yet. Trucks, buses and bikes still crash the 2.82 way (a push and a small dent). The first F10 of a BeamNG session waits about 10 seconds while the boxes are made.
 - With `PuppetSolid=1` you sit in the GTA car's seat in first person, not BeamNG's.
 - Some hillsides and bridge decks can have holes or show up a few seconds late.
 - The camera can lag a little at low speed.
@@ -67,8 +70,8 @@ Everything is in `GtaBeamD1.ini`, with comments. The ones you're most likely to 
 - `PuppetSolid=1` (default): GTA's world reacts to your car with GTA's own physics. `0` goes back to the 2.76 way (traffic you touch vanishes, set by `TrafficMode`).
 - `PuppetNoMap=1` (default, 2.81): GTA's hidden car ignores GTA's map and BeamNG's solid posts; BeamNG alone hits them. `0`: the 2.77 way.
 - `CrashHurt=0` (default, 2.81): crashes don't hurt you. `1`: they do (Ctrl+F9 switches it in game).
-- `PuppetPassCar=1` (2.82): tested, it didn't keep the cars: GTA removes any traffic car the hidden car is teleported onto, colliding or not.
-- `TrafficProxies=4` (2.83, being tested; needs the 2.83 BeamNG mod): that many boxes wait in BeamNG. A GTA car about to meet yours gets one (sizes and weights: `proxyPool` in `GtaBeamD1_traffic.json`), BeamNG resolves the crash, GTA's car copies its box and the hidden car ignores that GTA car. `0`: the 2.82 way.
+- `TrafficProxies=4` (default, 2.83; needs the 2.83 BeamNG mod): that many boxes wait in BeamNG. A GTA car about to meet yours gets one (sizes and weights: `proxyPool` in `GtaBeamD1_traffic.json`), BeamNG resolves the crash, GTA's car copies its box and the hidden car ignores that GTA car. `0`: the 2.82 way.
+- `PuppetPassCar=1` (2.82): only for GTA cars with no box. It doesn't stop GTA removing a traffic car the hidden car is teleported onto.
 - `Weapons=0` turns off weapon damage on the car.
 - `DriveGravity` sets how heavy the car feels (1.1).
 - `ShowCarsMax` (4) is how many show cars you can park; each one uses video memory.
@@ -84,13 +87,14 @@ Please attach both logs:
 ## Roadmap
 Planned, in rough order. No dates, and things may change with your feedback.
 
-**Next update (2.81, in progress)**
+**Done in 2.83**
 - Low-speed crashes: your BeamNG car crumples against walls, kerbs and posts at any speed.
 - Crash damage on/off key (Ctrl+F9), off by default.
 - Fix for slow motion (Wasted, weapon wheel) making the car jump.
+- Soft-body hits from GTA's traffic: your car crumples where it's hit.
 
 **Planned**
-- Better soft-body hits from GTA's traffic, people and props: your car crumples where it's hit.
+- Better soft-body hits from GTA's people and props: your car crumples where it's hit.
 - The hidden GTA car picked automatically to match your BeamNG car's size.
 - Tyre smoke and screech when the wheels spin.
 - No more holes on hills and bridges.
