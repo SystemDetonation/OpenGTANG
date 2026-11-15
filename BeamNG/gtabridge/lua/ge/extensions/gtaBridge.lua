@@ -77,7 +77,7 @@
 --   gtaBridge.soundSession(false) -- v2.4: switch the sound "session" mode off (the GTA plugin's BeamNGSoundWake=session sets it)
 
 local M = {}
-M.version = '2.74.1'
+M.version = '2.83'
 local logTag = 'gtaBridge'
 
 -- ---------------------------------------------------------------- config
@@ -5827,7 +5827,12 @@ handlers.twp = function(m)
   end
   T.clear('a new pool')
   for k, model in ipairs(m.m) do
-    if k <= 8 and type(model) == 'string' and model ~= '' then T.pool[k] = { k = k, model = model, want = model, state = 'want' } end
+    if k <= 8 and type(model) == 'string' and model ~= '' then
+      T.pool[k] = { k = k, model = model, want = model, state = 'want' }
+      -- v2.83: "box:width:length:height:kg": a proxy box (the mod's own gtab_prop, sized and weighted by its jbeam variables), not a BeamNG car
+      local bw, bl, bh, bm = model:match('^box:([%d.]+):([%d.]+):([%d.]+):([%d.]+)$')
+      if bw then T.pool[k].box = { tonumber(bw), tonumber(bl), tonumber(bh), tonumber(bm) } end
+    end
   end
   T.fallback = type(m.fb) == 'table' and m.fb or { 'fullsize', 'pickup', 'covet' }
   logI('traffic twins: GTA asked for ' .. #m.m .. ': ' .. table.concat(m.m, ', '))
@@ -5845,6 +5850,25 @@ world.tw.spawnOne = function(e)
     local old = scenetree.findObject('gtab_twin_' .. e.k)
     if old then old:delete() end
   end)
+  if e.box then   -- v2.83 (spawned the way the physics props are: world.phys.spawnOne)
+    local cfgT = { format = 2, model = 'gtab_prop', parts = {}, vars = { ['$gx'] = e.box[1], ['$gy'] = e.box[2], ['$gz'] = e.box[3], ['$gm'] = e.box[4] } }
+    local opts = { config = cfgT, pos = pos, rot = quat(0, 0, 0, 1), autoEnterVehicle = false, cling = false, vehicleName = 'gtab_twin_' .. e.k }
+    local t0 = os.clock()
+    for _, way in ipairs({ world.phys.how or 'core_vehicles', 'spawn' }) do
+      if not e.veh then
+        local ok, v = pcall(function()
+          if way == 'core_vehicles' then return core_vehicles.spawnNewVehicle('gtab_prop', opts) end
+          return spawn.spawnVehicle('gtab_prop', serialize(cfgT), opts.pos, opts.rot, { autoEnterVehicle = false, cling = false, vehicleName = opts.vehicleName })
+        end)
+        if ok and v then e.veh = v else errs[#errs + 1] = way .. ': ' .. tostring(v) end
+      end
+    end
+    if e.veh then
+      pcall(function() e.vid = e.veh:getID() end)
+      e.ms = (os.clock() - t0) * 1000
+    end
+    tried = {}
+  end
   for _, model in ipairs(tried) do
     local t0 = os.clock()
     local ok, v = pcall(function()
@@ -5948,12 +5972,17 @@ handlers.twa = function(m)
   local u = norm({ u0[1] - f[1] * du, u0[2] - f[2] * du, u0[3] - f[3] * du })
   local r = cross(f, u)
   local v = type(m.v) == 'table' and m.v or { 0, 0, 0 }
-  local lead = 1 / 60   -- (it moves from the next frame: put where GTA's car will be then)
-  local P = {}
-  for i = 1, 3 do P[i] = m.p[i] + v[i] * lead - (r[i] * e.o[1] + f[i] * e.o[2] + u[i] * e.o[3]) + u[i] * 0.03 end
+  local lead = e.box and 0.06 or 1 / 60   -- (it moves from the next frame: put where GTA's car will be then; a box: when its place is checked)
+  local P, M, ro = {}, {}, {}
+  for i = 1, 3 do
+    ro[i] = r[i] * e.o[1] + f[i] * e.o[2] + u[i] * e.o[3]
+    M[i] = m.p[i] + v[i] * lead + u[i] * (e.box and 0.10 or 0.03)   -- (v2.83: a box 10 cm up: no corner starts under uneven ground)
+    P[i] = M[i] - ro[i]
+  end
   -- v2.72: setPositionRotation's own rotation convention (v2.71 took the one learned for the player's safeTeleport: twins could
   -- face backwards); checked 2 frames later against the asked forward, the next one tried if wrong, the good one kept
   e.tpTo = { P = P, f = f, u = u, ci = T.ci or 2 }
+  if e.box then e.tpTo.P, e.tpTo.M, e.tpTo.ro, e.boxOk, e.tChk, e.okN = nil, M, ro, false, now(), 0 end   -- (v2.83: where it goes: tpTwin, by T.byMiddle)
   local ok, err = T.tpTwin(e)
   if not ok then
     T.say({ t = 'twf', k = m.k, why = 'teleport failed: ' .. tostring(err) })
@@ -5965,7 +5994,7 @@ handlers.twa = function(m)
   e.rest = nil   -- (taken again 3 frames after the teleport: its shape here, repaired, upright)
   e.pk = tonumber(m.pk) == 1
   T.acts = T.acts + 1
-  pcall(function() e.veh:queueLuaCommand(string.format("input.event('throttle',0,2) input.event('brake',0,2) input.event('steering',0,2) input.event('parkingbrake',%d,2)", e.pk and 1 or 0)) end)
+  if not e.box then pcall(function() e.veh:queueLuaCommand(string.format("input.event('throttle',0,2) input.event('brake',0,2) input.event('steering',0,2) input.event('parkingbrake',%d,2)", e.pk and 1 or 0)) end) end
   if T.acts <= 30 then
     logI(string.format('traffic twins: twin %d (%s) put on GTA car %s at %.1f %.1f %.1f, %.0f km/h%s', e.k, e.model, tostring(m.id), m.p[1], m.p[2], m.p[3],
       math.sqrt(v[1] ^ 2 + v[2] ^ 2 + v[3] ^ 2) * 3.6, e.pk and ', parked' or ''))
@@ -5976,7 +6005,61 @@ world.tw.tpTwin = function(e)
   local cands = rotCandidates(to.f, to.u)
   local c = cands[to.ci] or cands[2] or cands[1]
   if not c then return false, 'no rotation' end
-  return pcall(function() e.veh:setPositionRotation(to.P[1], to.P[2], to.P[3], c[2].x, c[2].y, c[2].z, c[2].w) end)
+  -- v2.83: a box's position is a corner (its ref node); whether setPositionRotation places that or the jbeam's origin (the box's
+  -- bottom middle) is not documented: T.byMiddle, learned from where the first box really went (world.tw.boxCheck)
+  local P = to.P or (world.tw.byMiddle and to.M) or { to.M[1] - to.ro[1], to.M[2] - to.ro[2], to.M[3] - to.ro[3] }
+  return pcall(function() e.veh:setPositionRotation(P[1], P[2], P[3], c[2].x, c[2].y, c[2].z, c[2].w) end)
+end
+-- v2.83: a box just put on a GTA car: is it where it was asked, facing as asked? (the first frames after a teleport can still say its
+-- old spot: your v2.75 log, twins "thrown" at their second pose.) Until then it stands still and no pose goes to GTA; then it gets
+-- GTA's car's speed. Wrong by exactly its position-to-middle offset: the other placing is the right one (kept from then on).
+-- Not settled after 0.3 s: used as it is, the numbers logged
+world.tw.boxCheck = function(e, t)
+  local T, to, veh = world.tw, e.tpTo, e.veh
+  local okG, pos = pcall(function() return v3(veh:getPosition()) end)
+  local okF, fb = pcall(function() return norm(v3(veh:getDirectionVector())) end)
+  if not (okG and pos and okF and fb) then
+    if t - e.tChk > 0.3 then e.boxOk = true end
+    return
+  end
+  local dx, dy = pos[1] - (to.M[1] - to.ro[1]), pos[2] - (to.M[2] - to.ro[2])
+  local sgn = T.byMiddle and 1 or -1
+  local facing = dot(fb, to.f)
+  if dx * dx + dy * dy < 0.25 and facing > 0.95 then
+    -- (3 frames in a row: your v2.75 log: a twin's first pose was right, its second was not)
+    e.okN = (e.okN or 0) + 1
+    if e.okN < 3 then return end
+    e.boxOk, T.ci = true, to.ci
+    if (T.placeLogs or 0) < 12 then
+      T.placeLogs = (T.placeLogs or 0) + 1
+      logI(string.format('proxy boxes: box %d is where it was asked %.0f ms after its teleport (%.2f m off, facing %.2f; placed by its %s, rotation %d)', e.k, (t - e.tChk) * 1000,
+        math.sqrt(dx * dx + dy * dy), facing, T.byMiddle and 'bottom middle' or 'position', to.ci))
+    end
+  elseif dx * dx + dy * dy < 0.25 and (to.tries or 0) < 3 then
+    e.okN = 0
+    to.tries = (to.tries or 0) + 1
+    to.ci = to.ci % 4 + 1
+    logI(string.format('proxy boxes: box %d faced the wrong way (%.2f): trying rotation %d', e.k, facing, to.ci))
+    T.tpTwin(e)
+    e.frames, e.tChk = 0, t
+  elseif not to.flipped and (dx - sgn * to.ro[1]) ^ 2 + (dy - sgn * to.ro[2]) ^ 2 < 0.25 then
+    e.okN = 0
+    to.flipped = true
+    T.byMiddle = not T.byMiddle
+    logI(string.format('proxy boxes: BeamNG places a box by its %s (box %d came out %.2f m from where it was asked, exactly its position-to-middle offset): placed that way from now on',
+      T.byMiddle and 'bottom middle (the jbeam\'s origin), not its position' or 'position, not its bottom middle', e.k, math.sqrt(dx * dx + dy * dy)))
+    T.tpTwin(e)
+    e.frames, e.tChk = 0, t
+  elseif t - e.tChk > 0.3 then
+    e.boxOk = true
+    if (T.oddLogs or 0) < 12 then
+      T.oddLogs = (T.oddLogs or 0) + 1
+      logE(string.format('proxy boxes: box %d is NOT where it was asked 0.3 s after its teleport: %.2f m off (%.2f %.2f; its position-to-middle offset is %.2f %.2f), facing %.2f: used as it is',
+        e.k, math.sqrt(dx * dx + dy * dy), dx, dy, to.ro[1], to.ro[2], facing))
+    end
+  else
+    e.okN = 0   -- (not there yet, or back at its old spot: counted from the start again)
+  end
 end
 -- (v2.73: the v2.72 door latch toggle is gone: GTA turns the drawn car's doors itself, as far as GTA's are open)
 function M.eyeFromCar(e, how)
@@ -6015,9 +6098,33 @@ world.tw.tick = function()
   for _, e in pairs(T.pool) do
     if e.state == 'init' and t - e.t0 > 0.3 then
       local ok, good = pcall(T.measure, e)
-      if ok and good then
+      if ok and good and e.box and (math.abs(e.size[1] - e.box[1]) > 0.03 + 0.1 * e.box[1] or math.abs(e.size[2] - e.box[2]) > 0.03 + 0.1 * e.box[2]
+                                    or math.abs(e.size[3] - e.box[3]) > 0.03 + 0.1 * e.box[3]) then
+        if math.abs(e.size[1] - 0.5) < 0.1 and math.abs(e.size[2] - 0.5) < 0.1 and math.abs(e.size[3] - 1.0) < 0.15 then
+          -- v2.83: the jbeam's own default size: the size and weight asked were not passed (jbeam variables): not used
+          e.state = 'fail'
+          T.fails = T.fails + 1
+          logE(string.format('proxy boxes: box %d came out %.2f x %.2f x %.2f m (the jbeam\'s default), not %.2f x %.2f x %.2f: the size was not passed: taken out', e.k,
+            e.size[1], e.size[2], e.size[3], e.box[1], e.box[2], e.box[3]))
+          pcall(function() e.veh:delete() end)
+          e.veh = nil
+          T.say({ t = 'twi', k = e.k, ok = 0, why = 'box size wrong' })
+        else
+          -- (your v2.75 log: a covet measured 8.1 x 49.9 m: the measuring itself can be off): used at the size asked, its position
+          -- taken as its ref node (the corner g0: its bottom middle is half its width to the left, half its length behind)
+          logE(string.format('proxy boxes: box %d measures %.2f x %.2f x %.2f m (bottom middle %.2f %.2f %.2f), not the %.2f x %.2f x %.2f asked: measured wrong? used at the size asked',
+            e.k, e.size[1], e.size[2], e.size[3], e.o[1], e.o[2], e.o[3], e.box[1], e.box[2], e.box[3]))
+          e.size, e.o, e.cids, e.rest, e.guess = { e.box[1], e.box[2], e.box[3] }, { -e.box[1] * 0.5, -e.box[2] * 0.5, 0 }, {}, {}, true
+          T.park(e)
+          if e.state == 'park' then T.say({ t = 'twi', k = e.k, ok = 1, model = e.model, w = e.size[1], l = e.size[2], h = e.size[3] }) end
+        end
+      elseif ok and good then
         T.park(e)
         if e.state ~= 'park' then goto nextTwin end
+        if e.box then
+          logI(string.format('proxy boxes: box %d ready: %.2f x %.2f x %.2f m, %d kg asked; it measures %.2f x %.2f x %.2f m, its bottom middle %.2f %.2f %.2f from its position (spawned in %.0f ms)',
+            e.k, e.box[1], e.box[2], e.box[3], e.box[4], e.size[1], e.size[2], e.size[3], e.o[1], e.o[2], e.o[3], e.ms or 0))
+        end
         logI(string.format('traffic twins: twin %d is a %s (%.1f x %.1f x %.1f m, %d body nodes watched; spawned in %.0f ms)', e.k, e.model, e.size[1], e.size[2], e.size[3], #e.cids, e.ms or 0))
         T.say({ t = 'twi', k = e.k, ok = 1, model = e.model, w = e.size[1], l = e.size[2], h = e.size[3] })
       elseif t - e.t0 > 3 then
@@ -6028,7 +6135,8 @@ world.tw.tick = function()
     elseif e.state == 'live' then
       e.frames = e.frames + 1
       local veh = e.veh
-      if e.frames == 2 and e.tpTo and not e.tpOk then
+      if e.box and not e.boxOk and e.frames >= 2 then T.boxCheck(e, t) end   -- v2.83
+      if not e.box and e.frames == 2 and e.tpTo and not e.tpOk then
         local okF, fb = pcall(function() return norm(v3(veh:getDirectionVector())) end)
         if okF and dot(fb, e.tpTo.f) > 0.95 then
           e.tpOk, T.ci = true, e.tpTo.ci
@@ -6041,12 +6149,12 @@ world.tw.tick = function()
         end
       end
       if e.frames == 3 and not e.rest then pcall(T.takeRest, e) end
-      if not e.velDone and e.frames >= 1 then
+      if not e.velDone and e.frames >= 1 and (not e.box or e.boxOk) then
         e.velDone = true
         local v = e.vel
         pcall(function() veh:applyClusterVelocityScaleAdd(veh:getRefNodeId(), 1, v[1], v[2], v[3]) end)
       end
-      local okP = pcall(function()
+      local okP = (e.box and not e.boxOk) or pcall(function()   -- (v2.83: a box: no pose until it is where it was asked)
         local p = v3(veh:getPosition())
         local r, f, u = T.frame(veh)
         local vel = v3(veh:getVelocity())
