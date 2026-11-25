@@ -14637,6 +14637,7 @@ namespace
 	{
 		double s = AutoMatchScore(z.w, z.l, z.h);
 		if (headOk && z.head) s = 3.0 * AmSeatErr(z, bh) + 0.5 * s;  // (v2.85: 3x, was 2x: the race truck got the Bobcat XL, 26 cm off, over the Rebel, 12 cm)
+		else if (headOk) s = 3.0 * 1.0 + 0.5 * s;  // (its seat couldn't be read: taken as 1 m off, not as a perfect seat: the wheel loader got the Dump that way)
 		if (AmNameHit(beam, n)) s -= 3.0;
 		return s;
 	}
@@ -15050,7 +15051,8 @@ namespace
 		const NVec3 hl = Call<NVec3>(N::GET_OFFSET_FROM_ENTITY_GIVEN_WORLD_COORDS, g_am.hv, hd.x, hd.y, hd.z);
 		const bool  in = Call<int>(N::IS_PED_IN_VEHICLE, g_am.clone, g_am.hv, 0) != 0;
 		const float rx = hl.x - (mn.x + mx.x) * 0.5f, ry = hl.y - (mn.y + mx.y) * 0.5f, rz = hl.z - mn.z;
-		if (in && std::isfinite(rx) && fabsf(rx) < 2.0f && fabsf(ry) < 4.0f && rz > 0.2f && rz < 3.5f) {
+		// (v2.85: big machines: the Dump's driver sits 4.6 m up, the Handler's 4.4 m: 3.5 m was too low a limit)
+		if (in && std::isfinite(rx) && fabsf(rx) < 4.0f && fabsf(ry) < 8.0f && rz > 0.2f && rz < 8.0f) {
 			z.head = true;
 			z.hx = rx, z.hy = ry, z.hz = rz;
 			Log("auto-match (v2.85): %s: its driver's head at %.2f right, %.2f forward, %.2f up of its footprint's middle, bottom", n.c_str(), rx, ry, rz);
