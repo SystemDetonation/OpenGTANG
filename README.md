@@ -25,7 +25,7 @@ GTA V runs the world, the walking and the guns. BeamNG.drive runs the car. Both 
 ## Keys (in GTA)
 | Key | What it does |
 |---|---|
-| **F7** | In-game menu (2.85): the main switches and actions, saved to the ini as you change them |
+| **F7** | In-game menu (2.85): the main switches and actions, saved to the ini as you change them. Its **Get car from BeamNG** does the whole setup: exports the car, gets you the GTA vehicle closest to its size (spawned where you stand if you're on foot) and puts the BeamNG car on it, so F10 is all that's left |
 | **Shift+F11** | Get the car from BeamNG (export). Do it again after you change the car in BeamNG. |
 | **F11** | Put the BeamNG car on the GTA car you're in or next to (press again to take it off) |
 | **F10** | Drive mode on/off: BeamNG's physics drive the car |
