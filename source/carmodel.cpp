@@ -1167,7 +1167,12 @@ namespace car
 				c.ey = hi[1] - lo[1];
 				c.ez = hi[2] - lo[2];
 				// a car is longest front to back and lower than it is wide
-				c.score = (c.ey >= c.ex && c.ey >= c.ez ? 2 : 0) + (c.ez <= c.ex * 1.05 ? 1 : 0);
+				const bool longest = c.ey >= c.ex && c.ey >= c.ez;
+				c.score = (longest ? 2 : 0) + (c.ez <= c.ex * 1.05 ? 1 : 0);
+				// motorcycles: a bike is taller than it is wide, so "lower than wide" picked a tilted, sideways reading of the Bati
+				// (0.81 wide x 2.08 long x 1.07 tall lost 2 to 3 against 1.52 x 1.85 x 1.25). A file from the BeamNG mod (it names its
+				// version) is written in glTF axes with the driving direction: that reading wins whenever it is longest front to back
+				if (!out.modVersion.empty() && axes == 0 && orient == 0 && longest) c.score += 2;
 				c.name = axes == 0 ? (orient == 0 ? "glTF axes, export direction" : "glTF axes, vehicle space")
 				                   : (orient == 0 ? "BeamNG axes, export direction" : "BeamNG axes, vehicle space");
 				cands.push_back(c);

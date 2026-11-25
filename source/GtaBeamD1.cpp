@@ -116,7 +116,7 @@
 #include "carmodel.h"
 #include "shv.h"
 
-#define D1_VERSION "2.83"
+#define D1_VERSION "2.84"
 
 namespace
 {
@@ -300,6 +300,9 @@ namespace
 		constexpr UINT64 SET_DISABLE_MAP_COLLISION = 0x75627043C6AA90AD;      // veh: the map (world, buildings, fixed objects) stops colliding with it; entities still do (build 1180)
 		constexpr UINT64 SET_ENTITY_NO_COLLISION_ENTITY = 0xA53ED5520C07654A; // entity1, entity2, thisFrameOnly
 		constexpr UINT64 IS_ENTITY_ON_SCREEN = 0xE659E47AF827484B;            // v2.82 (the hit car's line)
+		// v2.84 motorcycles
+		constexpr UINT64 SET_VEHICLE_ON_GROUND_PROPERLY = 0x49733E92263139D1;      // veh, p1: stood on its wheels
+		constexpr UINT64 SET_VEHICLE_STEER_BIAS = 0x42A8EC77D5150CBE;              // veh, steer (-1..1, + left): held while set each frame
 		constexpr UINT64 GET_VEHICLE_BODY_HEALTH = 0xF271147EB7B40F12;        // v2.82
 	}
 
@@ -604,6 +607,9 @@ namespace
 		float       psHitMs = 1.0f;           // PuppetHitMs: a speed change GTA made bigger than this (m/s) is a crash
 		// v2.81 (PuppetNoMap=0, PuppetSlowMoFix=0, CrashHurt=1 = exactly v2.77)
 		bool        psNoMap = false;          // PuppetNoMap: the hidden car ignores GTA's map (walls, kerbs, ground) and BeamNG's solid posts: BeamNG alone hits them
+		float       bikeLeanSteer = 1.0f;     // BikeLeanSteer: (v2.84) GTA's front-wheel steer at BikeLeanFullDeg of BeamNG's lean (GTA poses its rider from it); 0 off, < 0 the other way
+		float       bikeLeanFullDeg = 40.0f;  // BikeLeanFullDeg: (v2.84) the lean that gives BikeLeanSteer in full
+		float       bikeLeanFeedback = 1.5f;  // BikeLeanFeedback: (v2.84) extra steer from the gap between GTA's lean and BeamNG's
 		int         trafficProxies = 0;       // TrafficProxies: (v2.83) boxes in BeamNG that take a GTA car's place for a crash while PuppetSolid is on (0: v2.82)
 		bool        psPassCar = false;        // PuppetPassCar: (v2.82) teleported into the GTA car it just hit: it doesn't collide with that car until they're apart
 		bool        psSlowFix = false;        // PuppetSlowMoFix: (v2.78) GTA in slow motion: the hidden car's speed scaled so it keeps up with BeamNG's car
@@ -1032,6 +1038,9 @@ namespace
 			c.psSnapM = std::clamp(IniFloat(path, "PuppetSnapM", 2.0f), 0.5f, 20.0f);
 			c.psHitMs = std::clamp(IniFloat(path, "PuppetHitMs", 1.0f), 0.2f, 20.0f);
 			c.psNoMap = GetPrivateProfileIntA(kSec, "PuppetNoMap", 0, path) != 0;  // v2.81
+			c.bikeLeanSteer = std::clamp(IniFloat(path, "BikeLeanSteer", 1.0f), -1.0f, 1.0f);           // v2.84
+			c.bikeLeanFullDeg = std::clamp(IniFloat(path, "BikeLeanFullDeg", 40.0f), 5.0f, 80.0f);      // v2.84
+			c.bikeLeanFeedback = std::clamp(IniFloat(path, "BikeLeanFeedback", 1.5f), 0.0f, 5.0f);      // v2.84
 			c.psSlowFix = GetPrivateProfileIntA(kSec, "PuppetSlowMoFix", 0, path) != 0;
 			c.psPassCar = GetPrivateProfileIntA(kSec, "PuppetPassCar", 0, path) != 0;  // v2.82
 			c.trafficProxies = std::clamp(int(GetPrivateProfileIntA(kSec, "TrafficProxies", 0, path)), 0, 8);  // v2.83
@@ -2050,6 +2059,7 @@ namespace
 		bool     rotFailed = false;
 		bool     frozen = false;
 		bool     foot = false;  // v2.61: you got out with drive mode on: BeamNG keeps its car parked
+		bool     bike = false;  // v2.84: the GTA vehicle is a motorcycle or bicycle (class 8 / 13): see "v2.84" below
 		// wheels for drawing (from the last interpolated pose, car space)
 		bool     wHave = false;
 		bool     wOk[kDrvWheels] = {};
@@ -3936,7 +3946,8 @@ namespace
 			g_dset.driftMax = std::max(g_dset.driftMax, dr);
 			++g_dset.driftN;
 		}
-		if (g_cfg.driveDrawPose == 1) {
+		// v2.84: a bike is drawn at BeamNG's pose (its lean exactly; GTA's physics can still pull its hidden bike upright within a step)
+		if (g_cfg.driveDrawPose == 1 || (g_drv.bike && !g_drv.foot)) {
 			c.ox = E[0];
 			c.oy = E[1];
 			c.oz = E[2];
@@ -3949,14 +3960,10 @@ namespace
 		}
 	}
 
-	void DrvSetPuppet(const double O[3], const double R[3], const double F[3], const double U[3], const double V[3])
+	// turn the hidden GTA car to R/F/U (d.rotMode: rotation order 2, or a quaternion)
+	void DrvSetRot(int veh, const double R[3], const double F[3], const double U[3])
 	{
-		DriveState& d = g_drv;
-		const int   veh = d.veh;
-		const double e[3] = { O[0] - (R[0] * d.lx + F[0] * d.ly + U[0] * d.lz), O[1] - (R[1] * d.lx + F[1] * d.ly + U[1] * d.lz),
-			                  O[2] - (R[2] * d.lx + F[2] * d.ly + U[2] * d.lz) };
-		CallVoid(N::SET_ENTITY_COORDS_NO_OFFSET, veh, float(e[0]), float(e[1]), float(e[2]), 0, 0, 0);
-		if (d.rotMode == 0) {
+		if (g_drv.rotMode == 0) {
 			// GTA rotation order 2: the inverse of CamBasis (verified for the camera in D0)
 			const double pitch = asin(std::clamp(F[2], -1.0, 1.0)) / kDeg;
 			const double yaw = atan2(-F[0], F[1]) / kDeg;
@@ -3967,6 +3974,31 @@ namespace
 			BasisQuat(R, F, U, q);
 			CallVoid(N::SET_ENTITY_QUATERNION, veh, float(q[0]), float(q[1]), float(q[2]), float(q[3]));
 		}
+	}
+
+	// v2.84: GTA leans its own bikes from the front wheel's steer, and poses the rider from that lean (tested at 36 km/h on the
+	// runway: a turn made by the spin alone kept the rider centred; steer alone leaned the bike and he hung off into it). A lean
+	// forced from outside is one GTA balances against: the rider hangs off the other way (your test). So GTA leans the bike itself:
+	// each tick its steer follows BeamNG's lean (upright = straight, leaning right = steering right), plus the gap between GTA's
+	// lean now (Rc/Uc, when known) and BeamNG's x BikeLeanFeedback. SET_VEHICLE_STEER_BIAS: + is left, held only while set each frame
+	void BikeSteerFromLean(int veh, const double R[3], const double U[3], const double* Rc = nullptr, const double* Uc = nullptr)
+	{
+		if (g_cfg.bikeLeanSteer == 0.0f) return;
+		const double want = atan2(-R[2], U[2]) / kDeg;  // + leaning right (GTA rotation order 2, as DrvSetRot)
+		double       lean = want;
+		if (Rc && Uc) lean += g_cfg.bikeLeanFeedback * (want - atan2(-Rc[2], Uc[2]) / kDeg);
+		const double s = std::clamp(-lean / g_cfg.bikeLeanFullDeg, -1.0, 1.0) * g_cfg.bikeLeanSteer;  // (+ is left)
+		CallVoid(N::SET_VEHICLE_STEER_BIAS, veh, float(s));
+	}
+
+	void DrvSetPuppet(const double O[3], const double R[3], const double F[3], const double U[3], const double V[3])
+	{
+		DriveState& d = g_drv;
+		const int   veh = d.veh;
+		const double e[3] = { O[0] - (R[0] * d.lx + F[0] * d.ly + U[0] * d.lz), O[1] - (R[1] * d.lx + F[1] * d.ly + U[1] * d.lz),
+			                  O[2] - (R[2] * d.lx + F[2] * d.ly + U[2] * d.lz) };
+		CallVoid(N::SET_ENTITY_COORDS_NO_OFFSET, veh, float(e[0]), float(e[1]), float(e[2]), 0, 0, 0);
+		DrvSetRot(veh, R, F, U);
 		if (g_cfg.driveSetVelocity) {
 			CallVoid(N::SET_ENTITY_VELOCITY, veh, float(V[0]), float(V[1]), float(V[2]));
 		}
@@ -11625,6 +11657,13 @@ namespace
 		d = DriveState{};
 		d.m = m;
 		d.veh = g_tgt.veh;
+		{
+			const int cls = Call<int>(N::GET_VEHICLE_CLASS, d.veh);
+			d.bike = cls == 8 || cls == 13;  // v2.84
+			if (d.bike) Log("drive (v2.84): the GTA vehicle is a %s: bike handling on (GTA's ground kept; GTA leans it to BeamNG's lean with "
+			                   "its steer: BikeLeanSteer %.2f at %.0f deg, feedback %.2f; stood up when you get off)", cls == 8 ? "motorcycle" : "bicycle", g_cfg.bikeLeanSteer,
+				g_cfg.bikeLeanFullDeg, g_cfg.bikeLeanFeedback);
+		}
 		d.modelGen = gen;
 		d.replySeen = rc;
 		d.state = 1;
@@ -12616,7 +12655,12 @@ namespace
 		CallVoid(N::SET_ENTITY_COLLISION, d.veh, 1, 1);
 		PsProofs(true);
 		S.on = true;
-		S.noMap = g_cfg.psNoMap;  // v2.81
+		// v2.81; v2.84: not on a bike. With GTA's map off (and gravity off) GTA says a bike is in the air every tick (your Bati log:
+		// 497 of 504 ticks), and a bike in the air makes its rider play the bail-out flail. A bike keeps GTA's ground (v2.77's way)
+		// (GTA still throws you off in a crash: kept on purpose, as you asked after the first test)
+		S.noMap = g_cfg.psNoMap && !d.bike;
+		if (d.bike && g_cfg.psNoMap)
+			Log("PuppetNoMap (v2.84): off for this bike: it keeps GTA's ground and gravity, so GTA doesn't take it as in the air (the rider's bail-out flail)");
 		if (S.noMap) {
 			CallVoid(N::SET_ENTITY_HAS_GRAVITY, d.veh, 0);  // (no GTA ground under it now: its height is BeamNG's car's, by the speed spring)
 			CallVoid(N::SET_DISABLE_MAP_COLLISION, d.veh);
@@ -12628,7 +12672,9 @@ namespace
 		++S.engages;
 		S.cls = std::clamp(Call<int>(N::GET_VEHICLE_CLASS, d.veh), 0, 22);
 		S.mass = T.classMass[S.cls];
-		S.beamMass = T.beamMass;
+		// v2.84: BeamNG's vehicle is a bike too (not beamMass's 1500 kg car): GTA's crash on the hidden bike reaches BeamNG's bike in
+		// full, not x0.17 (your 2.84 test: GTA's bike lost 45 km/h on a prop, BeamNG's got 7.6 km/h and rode on 2.5 m ahead)
+		S.beamMass = d.bike ? S.mass : T.beamMass;
 		if (S.logT == 0) S.logT = NowSeconds();
 		Log("PuppetSolid (v2.77): ENGAGED (%s; %u this session): GTA's hidden car %d (%s, class %d %s, taken as %.0f kg; BeamNG's car taken as %.0f kg: GtaBeamD1_traffic.json) "
 		    "is solid: collision on, gravity on, moved by its speed (no teleport); its body %.2f x %.2f x %.2f m, the drawn BeamNG car %.2f x %.2f x %.2f m; GTA's crash damage "
@@ -12895,6 +12941,10 @@ namespace
 		const NVec3  vr = Call<NVec3>(N::GET_ENTITY_VELOCITY, veh);
 		const double Mc[3][3] = { { rt.x, fw.x, up.x }, { rt.y, fw.y, up.y }, { rt.z, fw.z, up.z } };
 		const double P[3] = { ps.x, ps.y, ps.z }, Vr[3] = { vr.x, vr.y, vr.z };
+		if (d.bike) {  // v2.84: GTA leans its own bike (and its rider with it) to BeamNG's lean
+			const double Rc[3] = { rt.x, rt.y, rt.z }, Uc[3] = { up.x, up.y, up.z };
+			BikeSteerFromLean(veh, R, U, Rc, Uc);
+		}
 		const double rx = E[0] - P[0], ry = E[1] - P[1], rz = E[2] - P[2], eh = hypot(rx, ry), el = sqrt(rx * rx + ry * ry + rz * rz), ez = rz;
 		if (S.noMap) {  // v2.81: GTA's map and BeamNG's solid posts don't stop it (BeamNG alone hits them)
 			CallVoid(N::SET_DISABLE_MAP_COLLISION, veh);
@@ -13118,6 +13168,14 @@ namespace
 			}
 			double w[3];
 			for (int k = 0; k < 3; ++k) w[k] = wff[k] + g_cfg.psGainTurn * rv[k];
+			if (d.bike) {
+				// v2.84: no roll from here on a bike: a lean forced from outside (this turn, or the pose set outright as the first 2.84 tests
+				// did) makes GTA balance it, and its rider hangs off the other way (your test: GTA's bike at BeamNG's lean within 2 deg, the
+				// rider opposite whichever way the steer went). GTA leans it itself (BikeSteerFromLean); heading and pitch still come from here
+				const double fc[3] = { Mc[0][1], Mc[1][1], Mc[2][1] };
+				const double along = w[0] * fc[0] + w[1] * fc[1] + w[2] * fc[2];
+				for (int k = 0; k < 3; ++k) w[k] -= along * fc[k];
+			}
 			const double wl = PsLen(w);
 			if (wl > 12.0)
 				for (double& x : w) x *= 12.0 / wl;
@@ -13146,7 +13204,7 @@ namespace
 			memcpy(S.wRaw, raw, sizeof(S.wRaw));
 			S.haveSet = true;
 			S.lastHold = false;
-			S.wOk = true;
+			S.wOk = !d.bike;  // v2.84: (a bike's turn is set outright: its spin can't tell SET_ENTITY_ANGULAR_VELOCITY's frame)
 			++S.setTicks;
 		}
 		// for DrvDrawCheck (DriveDrawPose=set draws BeamNG's pose) and F10 off
@@ -13188,7 +13246,41 @@ namespace
 		DriveState& d = g_drv;
 		d.foot = out;
 		const int ped = Call<int>(N::PLAYER_PED_ID);
-		if (out) {
+		if (out && d.bike) {
+			// v2.84: a frozen bike pinned to BeamNG's every tick can't be picked up: you lifted it, it didn't move, you fell off (and a
+			// BeamNG bike parked on its side pinned GTA's on its side too). A bike is stood up on its wheels where it is, facing the way it
+			// faced, and left to GTA's physics (not frozen, not moved) until you're back on; then BeamNG's bike comes to it, upright
+			PsOff("you got off the bike: it stands on its wheels, GTA's physics", false);
+			NVec3 fw{}, rt{}, up{}, ps{};
+			CallVoid(N::GET_ENTITY_MATRIX, d.veh, &fw, &rt, &up, &ps);
+			const float yaw = float(atan2(-fw.x, fw.y) / kDeg);
+			CallVoid(N::FREEZE_ENTITY_POSITION, d.veh, 0);
+			CallVoid(N::SET_ENTITY_COLLISION, d.veh, 1, 1);
+			CallVoid(N::SET_ENTITY_HAS_GRAVITY, d.veh, 1);
+			CallVoid(N::SET_ENTITY_VELOCITY, d.veh, 0.0f, 0.0f, 0.0f);
+			CallVoid(N::SET_ENTITY_ANGULAR_VELOCITY, d.veh, 0.0f, 0.0f, 0.0f);
+			CallVoid(N::SET_ENTITY_ROTATION, d.veh, 0.0f, 0.0f, yaw, 2, 1);
+			CallVoid(N::SET_VEHICLE_ON_GROUND_PROPERLY, d.veh, 5.0f);
+			g_dset.valid = false;  // (drawn where GTA's bike is now, not at BeamNG's last pose)
+			d.setValid = false;    // (nothing set on it until you're back on: the rotation read-back check waits)
+			CallVoid(N::SET_ENTITY_VISIBLE, ped, 1, 0);
+			CallVoid(N::RESET_ENTITY_ALPHA, ped);
+			Log("drive (v2.84): you got off the bike: GTA's bike stood up on its wheels (facing %.0f deg) and left to GTA's physics; BeamNG keeps its bike parked; "
+			    "get back on to drive (BeamNG's bike is put upright under you), %s ends drive mode", yaw, KeyName(g_cfg.driveKey));
+			Notify("You got off: the bike stands. Get back on to ride. %s: drive mode off.", KeyName(g_cfg.driveKey));
+		} else if (!out && d.bike && g_cfg.world) {
+			// v2.84: back on: BeamNG's bike goes where GTA's stands, upright (as at F10: the hidden bike waits ghosted until it's there)
+			CallVoid(N::SET_ENTITY_COLLISION, d.veh, 0, 1);
+			CallVoid(N::SET_ENTITY_HAS_GRAVITY, d.veh, 0);
+			CallVoid(N::SET_ENTITY_VELOCITY, d.veh, 0.0f, 0.0f, 0.0f);
+			if (d.engineOff) CallVoid(N::SET_VEHICLE_ENGINE_ON, d.veh, 0, 1, 1);
+			d.state = 3;
+			d.tpSent = false;
+			d.tpWhy = "back on the bike";
+			d.tpFirstT = NowSeconds();
+			Log("drive (v2.84): back on the bike: BeamNG's bike is put upright where GTA's stands, then BeamNG drives again");
+			Notify("Back on: BeamNG's bike is stood up under you...");
+		} else if (out) {
 			PsOff("you got out: the hidden car stands frozen as in v2.76", false);  // v2.77 (back in: engaged again)
 			CallVoid(N::SET_ENTITY_COLLISION, d.veh, 1, 1);
 			CallVoid(N::FREEZE_ENTITY_POSITION, d.veh, 1);
@@ -13791,7 +13883,9 @@ namespace
 		}
 
 		// ---- the read-back check: did GTA take the rotation we set last tick?
-		if (d.setValid && d.anchored && !g_ps.on) {  // (v2.77: PuppetSolid sets no rotation)
+		// (v2.77: PuppetSolid sets no rotation; v2.84: nor is a bike you got off turned: it's GTA's then. Your 2.84 test: 30 of 30 ticks
+		// "off" right after you came off the bike, quaternions taken for good, and a false "won't turn" note)
+		if (d.setValid && d.anchored && !g_ps.on && !(d.bike && d.foot)) {
 			const double F[3] = { c.F[0], c.F[1], c.F[2] }, U[3] = { c.U[0], c.U[1], c.U[2] };
 			const double ef = acos(std::clamp(Dot3(F, d.setF), -1.0, 1.0)) / kDeg, eu = acos(std::clamp(Dot3(U, d.setU), -1.0, 1.0)) / kDeg;
 			const double err = std::max(ef, eu);
@@ -14057,7 +14151,10 @@ namespace
 			}
 		}
 		if (g_cfg.puppetSolid && !d.foot) PsTick(O, R0, F0, U0, R, F, U, d.carV, ft, now);  // v2.77: solid, moved by its speed
-		else DrvSetPuppet(O, R, F, U, V);
+		else if (!(d.foot && d.bike)) {  // v2.84: a bike you got off is GTA's (not pinned to BeamNG's)
+			DrvSetPuppet(O, R, F, U, V);
+			if (d.bike && !d.foot) BikeSteerFromLean(d.veh, R, U);
+		}
 
 		// ---- wheels (car space) for the next tick's drawing
 		const double dtT = d.lastTickT > 0 ? std::min(0.1, now - d.lastTickT) : 0.0;
