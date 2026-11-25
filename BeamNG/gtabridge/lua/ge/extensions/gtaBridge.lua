@@ -5609,14 +5609,19 @@ local function tpUpdate()
     local vel0 = { 0, 0, 0 }
     pcall(function() vel0 = v3(veh:getVelocity()) end)
     local sp0 = math.sqrt(dot(vel0, vel0))
-    if df > 0.995 and dup > 0.99 and tp.keep and sp0 > 1.5 then
+    -- v2.85 (OpenGTANG): a bike (2 wheels) leans onto its stand as it lands, within these 3 frames: your GTA IV Angel faced the
+    -- right way within ~8 degrees on every try and failed all four ("no rotation made BeamNG's car face the GTA car's way").
+    -- A bike passes within ~14 degrees (the four conventions are 90+ degrees apart, so the wrong ones still fail)
+    local bike = drive and drive.okMsg and type(drive.okMsg.wheels) == 'table' and #drive.okMsg.wheels == 2
+    local dfMin, upMin = bike and 0.97 or 0.995, bike and 0.95 or 0.99
+    if df > dfMin and dup > upMin and tp.keep and sp0 > 1.5 then
       world.keepBad = string.format('the car kept %.1f m/s after it', sp0)
       logI('teleport: ' .. KEEP .. ': ' .. world.keepBad .. ': setPositionRotation from now on (it repairs the car)')
       tp.keep = false
       tp.state = 'go'
       return
     end
-    if df > 0.995 and dup > 0.99 then
+    if df > dfMin and dup > upMin then
       if eh > 0.15 and (tp.fixes or 0) < 2 then
         -- right way round but not at the spot (the teleport may place another point than getPosition reads): correct
         tp.fixes = (tp.fixes or 0) + 1

@@ -14481,6 +14481,9 @@ namespace
 		// SUVs, off-road, vans, pickups
 		"baller,cavalcade,granger,dubsta,landstalker,seminole,huntley,patriot,serrano,radi,rocoto,gresley,xls,mesa,rebel2,sandking2,sandking,bifta,"
 		"kalahari,bodhi2,dubsta3,bison,burrito3,speedo,rumpo,minivan,youga,surfer,sadler,bobcatxl,mule,benson,"
+		// trucks, semi cabs, buses (your 2.85 test: a BeamNG semi and bus only had the Mule and the Benson to pick from)
+		"phantom,hauler,packer,phantom3,pounder,biff,mixer,mixer2,tiptruck,tiptruck2,flatbed,rubble,boxville,boxville2,stockade,trash,firetruk,"
+		"ambulance,towtruck,scrap,barracks,bus,coach,airbus,rentalbus,tourbus,pbus,"
 		// motorcycles
 		"bati,akuma,pcj,sanchez,sanchez2,hexer,double,ruffian,vader,faggio2,daemon,bagger,nemesis,carbonrs,hakuchou,enduro,innovation,thrust,"
 		"lectro,vindicator,sovereign,bf400,gargoyle,cliffhanger";
