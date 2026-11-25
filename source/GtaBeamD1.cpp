@@ -1243,6 +1243,7 @@ namespace
 		float  bwC[kDrvWheels][3];       // hub centre
 		float  bwA[kDrvWheels][3];       // axle direction (pointing right)
 		float  bwAng[kDrvWheels];        // turn about the axle (rad, right-hand rule: rolling forward = negative)
+		bool   bwSpin;                   // v2.85: bwAng is BeamNG's own spin (about BeamNG's axle), not the speed model's (about the file's)
 		// HUD
 		bool   hudOn;
 		float  hud[4];                   // minimap rectangle in screen 0..1: x0 y0 x1 y1
@@ -2100,6 +2101,7 @@ namespace
 		bool     wHave = false;
 		bool     wOk[kDrvWheels] = {};
 		float    wC[kDrvWheels][3] = {}, wA[kDrvWheels][3] = {}, wAng[kDrvWheels] = {};
+		bool     wSpin = false;  // v2.85: wAng from BeamNG's spin (p.spin)
 		double   wAngU[kDrvWheels] = {};  // v2.73: BeamNG's turn angle as sent (counted on, not wrapped: the tyre smoke's slip)
 		bool     ang0Set[kDrvWheels] = {};
 		double   ang0[kDrvWheels] = {};
@@ -13960,6 +13962,7 @@ namespace
 			memcpy(c.bwC, d.wC, sizeof(c.bwC));
 			memcpy(c.bwA, d.wA, sizeof(c.bwA));
 			memcpy(c.bwAng, d.wAng, sizeof(c.bwAng));
+			c.bwSpin = d.wSpin;  // v2.85
 		}
 
 		// ---- the read-back check: did GTA take the rotation we set last tick?
@@ -14267,6 +14270,7 @@ namespace
 			any = true;
 		}
 		d.wHave = any;
+		d.wSpin = p.spin;  // v2.85
 		TireFxTick(O, R, F, U, dtT);  // v2.73
 
 		// ---- stats
@@ -14765,6 +14769,14 @@ namespace
 	{
 		g_am.fresh = fresh;
 		if (!g_am.memRead) AutoMatchMemory(false);
+		// v2.85: a car file of an impossible size (a test export read 185 x 140 m) is never matched, nor its pick remembered
+		if (g_modelSize[0].load() > 15.0f || g_modelSize[1].load() > 40.0f || g_modelSize[2].load() > 15.0f) {
+			Log("auto-match (v2.85): the loaded car is %.1f x %.1f x %.1f m: not a size to match (a broken export?): the car you have stays", g_modelSize[0].load(),
+				g_modelSize[1].load(), g_modelSize[2].load());
+			Notify("Auto-match: the car file looks wrong (%.0f m long). Export it again (Get car).", g_modelSize[1].load());
+			if (veh) Attach(veh);
+			return;
+		}
 		const bool spawn = !veh && spawnIfNone && g_haveModel.load();
 		if ((!veh && !spawn) || g_showVeh.count(veh) || !g_haveModel.load()) {
 			Attach(veh);  // (its own message: no car / a show car / no BeamNG car yet)
@@ -15844,6 +15856,7 @@ namespace
 		memcpy(d.bwC, s.bwC, sizeof(d.bwC));
 		memcpy(d.bwA, s.bwA, sizeof(d.bwA));
 		memcpy(d.bwAng, s.bwAng, sizeof(d.bwAng));
+		d.bwSpin = s.bwSpin;  // v2.85
 	}
 
 	void CamInCar(const CamSample& cam, const CamSample& car, double out[3])
@@ -19793,8 +19806,12 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 			double a0[3] = { w.axis[0], w.axis[1], w.axis[2] }, a1[3] = { cam.bwA[idx][0], cam.bwA[idx][1], cam.bwA[idx][2] };
 			Norm3(a0);
 			Norm3(a1);
-			if (Dot3(a0, a1) < 0) a1[0] = -a1[0], a1[1] = -a1[1], a1[2] = -a1[2];
-			const double sp = mode == 1 ? double(cam.bwAng[idx]) : 0.0;
+			// v2.85 (OpenGTANG): BeamNG's turn is about BeamNG's own axle, which points the other way on one side (the right
+			// wheels): with the axle flipped onto the file's, the turn must flip too (your test: every car's right wheels spun
+			// backwards in drive mode). The speed model's turn (no spin from BeamNG) is about the file's axle already
+			const bool flip = Dot3(a0, a1) < 0;
+			if (flip) a1[0] = -a1[0], a1[1] = -a1[1], a1[2] = -a1[2];
+			const double sp = mode == 1 ? double(cam.bwAng[idx]) * (flip && cam.bwSpin ? -1.0 : 1.0) : 0.0;
 			const double cs = cos(sp), sn = sin(sp), t = 1.0 - cs;
 			const double ax = a0[0], ay = a0[1], az = a0[2];
 			const double A[3][3] = {
