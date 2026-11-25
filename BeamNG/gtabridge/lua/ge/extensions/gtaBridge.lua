@@ -1152,6 +1152,34 @@ local function onExported(root)
     end)
     root.extras.gtaBridge = { version = M.version, paint = exportJob.paint, vehicle = exportJob.vehicle,
                               wheels = info.wheels, vehPos = vp, nodes = info.nodes, flex = info.flex, props = info.props, dg = info.dg }
+    -- v2.85 (OpenGTANG): a node under two parents (the wl40's one tire node under both wl40_tire_F and wl40_tire_R) is no
+    -- glTF: GTA's reader turned the whole file down ("invalid gltf"). Each extra parent gets its own copy of that node (and of
+    -- what hangs under it); the copies use the same meshes
+    pcall(function()
+      local nodes = root.nodes or {}
+      local nOrig, fixed, seen = #nodes, 0, {}
+      local function cloneTree(i)
+        local c = deepcopy(nodes[i + 1])
+        local kids = c.children
+        c.children = nil
+        nodes[#nodes + 1] = c
+        local ni = #nodes - 1
+        if type(kids) == 'table' then
+          c.children = {}
+          for k, ch in ipairs(kids) do c.children[k] = cloneTree(ch) end
+        end
+        return ni
+      end
+      for pi = 1, nOrig do
+        local ch = nodes[pi].children
+        if type(ch) == 'table' then
+          for k, c in ipairs(ch) do
+            if seen[c] then ch[k] = cloneTree(c); fixed = fixed + 1 else seen[c] = true end
+          end
+        end
+      end
+      if fixed > 0 then logI(string.format('export: %d node(s) were under two parents: each extra parent got its own copy (%d nodes now)', fixed, #nodes)) end
+    end)
     local s = jsonEncode(root)
     local wr = writeFile(exportCfg.vpath, s)
     if wr == false then error('writeFile failed for ' .. exportCfg.vpath) end
