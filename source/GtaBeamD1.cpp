@@ -14817,7 +14817,7 @@ namespace
 		AutoMatchMemory(true);
 		if (headOk && g_am.size[best].head)
 			Notify("Match: %s, your seat %.0f cm from BeamNG's driver.", best.c_str(), AmSeatErr(g_am.size[best], bh) * 100);
-		AutoMatchUse(best, headOk ? "your seat compared with BeamNG's driver's" : "size only: BeamNG sent no driver's eye (BeamNG mod 2.85?)");
+		AutoMatchUse(best, headOk ? "your seat compared with BeamNG's driver's" : "size only: BeamNG has no driver's camera for this vehicle (or its mod is older than 2.85)");
 	}
 
 	void AutoMatchChoose()

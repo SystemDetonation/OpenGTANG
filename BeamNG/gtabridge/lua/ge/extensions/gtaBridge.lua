@@ -2133,6 +2133,27 @@ local function driverEye(veh)
   if not (vd and vd.vdata and vd.vdata.camerasInternal) then vd = core_vehicle_manager.getPlayerVehicleData() or vd end
   local vdata = vd and vd.vdata
   if not vdata then return nil, 'no vehicle data' end
+  -- v2.85 (OpenGTANG): BeamNG 0.40 has no camerasInternal: the driver's camera is an occupant camera (cameras.occupant, the seat
+  -- whose defaultPermissionMode is 'driver') with its own node, so the eye is where that node is now
+  local occ = vdata.cameras and vdata.cameras.occupant
+  if type(occ) == 'table' then
+    local oc
+    for _, c in pairs(occ) do
+      if type(c) == 'table' and c.camNodeID and c.defaultPermissionMode == 'driver' then oc = c; break end
+    end
+    if not oc then for _, c in pairs(occ) do if type(c) == 'table' and c.camNodeID then oc = c; break end end end
+    if oc then
+      local okP, q = pcall(function() return v3(veh:getNodePosition(oc.camNodeID)) end)
+      if okP and q then
+        local f = norm(v3(veh:getDirectionVector()))
+        local u0 = v3(veh:getDirectionVectorUp())
+        local du = dot(f, u0)
+        local u = norm({ u0[1] - f[1] * du, u0[2] - f[2] * du, u0[3] - f[3] * du })
+        local r = cross(f, u)
+        return { dot(q, r), dot(q, f), dot(q, u) }, string.format('occupant camera %s (%s seat, node %s)', tostring(oc.seatId or oc.name), tostring(oc.seatSide), tostring(oc.camNodeID))
+      end
+    end
+  end
   local cams = vdata.camerasInternal
   if type(cams) ~= 'table' then return nil, 'no camerasInternal' end
   local c, how
