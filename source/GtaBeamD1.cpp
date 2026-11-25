@@ -14494,7 +14494,9 @@ namespace
 		"bati,akuma,pcj,sanchez,sanchez2,hexer,double,ruffian,vader,faggio2,daemon,bagger,nemesis,carbonrs,hakuchou,enduro,innovation,thrust,"
 		"lectro,vindicator,sovereign,bf400,gargoyle,cliffhanger,"
 		// more bikes, so each kind has a few (choppers, cruisers, sport, dirt, scooters)
-		"zombiea,zombieb,wolfsbane,nightblade,avarus,sanctus,hakuchou2,bati2,defiler,vortex,diablous,fcr,manchez,esskey,faggio,faggio3";
+		"zombiea,zombieb,wolfsbane,nightblade,avarus,sanctus,hakuchou2,bati2,defiler,vortex,diablous,fcr,manchez,esskey,faggio,faggio3,"
+		// quads, buggies, heavy machinery
+		"blazer,blazer2,blazer4,verus,dune,vagrant,outlaw,bulldozer,dump,handler";
 
 	struct AmSize
 	{
@@ -14634,7 +14636,7 @@ namespace
 	double AmTotal(const std::string& n, const AmSize& z, const std::string& beam, bool headOk, const double bh[3])
 	{
 		double s = AutoMatchScore(z.w, z.l, z.h);
-		if (headOk && z.head) s = 2.0 * AmSeatErr(z, bh) + 0.5 * s;
+		if (headOk && z.head) s = 3.0 * AmSeatErr(z, bh) + 0.5 * s;  // (v2.85: 3x, was 2x: the race truck got the Bobcat XL, 26 cm off, over the Rebel, 12 cm)
 		if (AmNameHit(beam, n)) s -= 3.0;
 		return s;
 	}
@@ -14656,6 +14658,10 @@ namespace
 			{ "sadler", "pickup" }, { "bobcatxl", "pickup" }, { "bison", "pickup" }, { "rebel2", "pickup" }, { "sandking", "pickup" }, { "sandking2", "pickup" },
 			{ "bus", "bus" }, { "coach", "bus" }, { "airbus", "bus" }, { "rentalbus", "bus" }, { "tourbus", "bus" }, { "pbus", "bus" },
 			{ "ambulance", "van" }, { "firetruk", "truck" },
+			// (your test: BeamNG's ATV got a Bifta: no quad was listed)
+			{ "blazer", "atv" }, { "blazer2", "atv" }, { "blazer4", "atv" }, { "verus", "atv" },
+			{ "bifta", "buggy" }, { "dune", "buggy" }, { "vagrant", "buggy" }, { "outlaw", "buggy" },
+			{ "bulldozer", "machinery" }, { "dump", "machinery" }, { "handler", "machinery" },
 		};
 		auto it = kNamed.find(n);
 		if (it != kNamed.end()) return it->second;
@@ -14696,7 +14702,10 @@ namespace
 		if (has("pickup") || has("ute")) return { { "pickup" }, { "offroad", "suv" } };
 		if (has("van")) return { { "van" }, { "suv" } };
 		if (has("suv") || has("crossover")) return { { "suv" }, { "offroad", "pickup" } };
-		if (has("buggy") || has("atv") || has("utv") || has("off-road") || has("offroad") || has("rally")) return { { "offroad" }, { "pickup", "suv" } };
+		if (has("atv") || has("quad")) return { { "atv" }, { "buggy", "offroad" } };
+		if (has("buggy") || has("utv") || has("side-by-side")) return { { "buggy" }, { "offroad", "atv" } };
+		if (has("off-road") || has("offroad") || has("rally")) return { { "offroad" }, { "buggy", "pickup", "suv" } };
+		if (has("loader") || has("dozer") || has("haul truck") || has("excavator") || has("forklift") || has("tractor")) return { { "machinery" }, { "truck" } };
 		if (has("hatchback")) return { { "compact", "sedan" }, { "coupe" } };
 		if (has("muscle")) return { { "muscle" }, { "coupe", "sports" } };
 		if (has("super") || has("sports") || has("race")) return { { "sports" }, { "coupe" } };
@@ -14704,6 +14713,7 @@ namespace
 		if (has("sedan") || has("wagon") || has("estate") || has("shooting brake") || has("limousine") || has("liftback")) return { { "sedan" }, { "coupe", "compact" } };
 		if (!body.empty()) return {};
 		if (!_stricmp(type.c_str(), "Truck")) return { { "truck", "pickup", "suv", "van" }, { "bus" } };
+		if (!_stricmp(type.c_str(), "Heavy Machinery")) return { { "machinery" }, { "truck" } };
 		return {};
 	}
 	bool AmInTier(const std::string& cat, const std::vector<std::string>& tier) { return std::find(tier.begin(), tier.end(), cat) != tier.end(); }
