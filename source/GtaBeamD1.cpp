@@ -116,7 +116,7 @@
 #include "carmodel.h"
 #include "shv.h"
 
-#define D1_VERSION "2.84"
+#define D1_VERSION "2.85"
 
 namespace
 {
@@ -304,6 +304,16 @@ namespace
 		constexpr UINT64 SET_VEHICLE_ON_GROUND_PROPERLY = 0x49733E92263139D1;      // veh, p1: stood on its wheels
 		constexpr UINT64 SET_VEHICLE_STEER_BIAS = 0x42A8EC77D5150CBE;              // veh, steer (-1..1, + left): held while set each frame
 		constexpr UINT64 GET_VEHICLE_BODY_HEALTH = 0xF271147EB7B40F12;        // v2.82
+		// v2.85 (OpenGTANG): AutoMatchCar (the hidden GTA car swapped for one of BeamNG's car's size) and the in-game menu
+		constexpr UINT64 CREATE_VEHICLE = 0xAF35D0D2583051B0;                 // model, x y z, heading, isNetwork, scriptHost, p7
+		constexpr UINT64 SET_PED_INTO_VEHICLE = 0xF75B0D629E1C063D;           // ped, vehicle, seat (-1 = driver)
+		constexpr UINT64 GET_ENTITY_HEADING = 0xE83D4F9BA2A38914;
+		constexpr UINT64 IS_MODEL_IN_CDIMAGE = 0x35B9E0803292B641;
+		constexpr UINT64 IS_MODEL_A_VEHICLE = 0x19AAC8F07BFEC53E;
+		constexpr UINT64 GET_VEHICLE_CLASS_FROM_NAME = 0xDEDF1C8BD47C2200;    // model -> class (0..22)
+		constexpr UINT64 GET_VEHICLE_NUMBER_OF_PASSENGERS = 0x24CB2137731FFE89;  // veh, includeDriver, includeDead
+		constexpr UINT64 SET_VEHICLE_HAS_BEEN_OWNED_BY_PLAYER = 0x2B5F9D2AF1F1722D;
+		constexpr UINT64 PLAY_SOUND_FRONTEND = 0x67C540AA08E4A6F5;            // soundId (-1), name, set, p3
 	}
 
 	// GTA control ids (input group 0)
@@ -614,6 +624,11 @@ namespace
 		bool        psPassCar = false;        // PuppetPassCar: (v2.82) teleported into the GTA car it just hit: it doesn't collide with that car until they're apart
 		bool        psSlowFix = false;        // PuppetSlowMoFix: (v2.78) GTA in slow motion: the hidden car's speed scaled so it keeps up with BeamNG's car
 		bool        crashHurt = true;         // CrashHurt: (v2.78) crashes hurt you; Ctrl+F9 switches it in game
+		// v2.85 (OpenGTANG)
+		bool        autoMatch = false;        // AutoMatchCar: F11 swaps the GTA car for the GTA model closest to BeamNG's car in size (a bike for a bike)
+		std::string autoMatchModels;          // AutoMatchModels: the GTA models it picks from (comma list; empty = the built-in list)
+		float       autoMatchKeepM = 0.3f;    // AutoMatchKeepM: the GTA car you're in is kept when it's within this of the best match (size score, m)
+		int         menuKey = VK_F7;          // MenuKey: the in-game menu
 	} g_cfg;
 
 	const char* kSec = "D1";
@@ -1045,6 +1060,18 @@ namespace
 			c.psPassCar = GetPrivateProfileIntA(kSec, "PuppetPassCar", 0, path) != 0;  // v2.82
 			c.trafficProxies = std::clamp(int(GetPrivateProfileIntA(kSec, "TrafficProxies", 0, path)), 0, 8);  // v2.83
 			c.crashHurt = GetPrivateProfileIntA(kSec, "CrashHurt", 1, path) != 0;
+			// v2.85 (OpenGTANG)
+			c.autoMatch = GetPrivateProfileIntA(kSec, "AutoMatchCar", 0, path) != 0;
+			c.autoMatchModels = NameList(path, "AutoMatchModels", "", false);
+			c.autoMatchKeepM = std::clamp(IniFloat(path, "AutoMatchKeepM", 0.3f), 0.0f, 5.0f);
+			{
+				char mk[32];
+				GetPrivateProfileStringA(kSec, "MenuKey", "", mk, sizeof(mk), path);
+				const long k = mk[0] ? strtol(mk, nullptr, 0) : 0;
+				c.menuKey = k > 0 && k < 256 ? int(k) : VK_F7;
+			}
+			Log("settings: v2.85: AutoMatchCar %d (models: %s; keep the car you're in within %.2f m of the best), menu key 0x%02X", int(c.autoMatch),
+				c.autoMatchModels.empty() ? "built-in list" : c.autoMatchModels.c_str(), c.autoMatchKeepM, c.menuKey);
 			Log("settings: v2.77: PuppetSolid %d%s (gain %.1f/s level, %.1f/s up/down, %.1f/s turn; snap past %.1f m; a crash = GTA changed its speed > %.1f m/s)", int(c.puppetSolid),
 				c.puppetSolid ? ": GTA's hidden car is solid, moved by its speed; the scripted traffic / people / prop reactions are off" : " (v2.76: the hidden car is a ghost)",
 				c.psGain, c.psGainZ, c.psGainTurn, c.psSnapM, c.psHitMs);
@@ -1363,6 +1390,7 @@ namespace
 	std::atomic<bool>           g_haveModel{ false };  // the render thread has a car to draw
 	std::string                 g_lastCarPath;         // guarded by g_modelMx
 	std::atomic<float>          g_modelSize[3] = {};   // width, length, height of the loaded car
+	std::atomic<int>            g_modelWheels{ -1 };   // v2.85: its wheels (2: a bike), -1 before a car is loaded
 	std::atomic<float>          g_doorAng[2] = {};     // v2.73: how far the drawn front doors are open (rad; left, right)
 	std::atomic<int>            g_doorParts[2] = {};   // v2.73: the drawn car's front door parts (left, right)
 	std::atomic<uint64_t>       g_dgBroken[4] = {};    // v2.6: the car's breakable groups (car::Model::dgNames) BeamNG broke (bit per group)
@@ -1740,9 +1768,9 @@ namespace
 
 	std::atomic<bool> g_attachedNew{ false };  // tells the render thread to relearn the environment
 
-	void Attach()
+	void Attach(int forced = 0)
 	{
-		const int veh = FindTargetCar();
+		const int veh = forced ? forced : FindTargetCar();
 		if (!veh) {
 			Notify("D1: no car found. Get in a car or stand next to one (15 m).");
 			return;
@@ -2891,6 +2919,7 @@ namespace
 		for (int k = 0; k < 3; ++k) {
 			g_modelSize[k].store(model->size[k]);
 		}
+		g_modelWheels.store(int(model->wheels.size()));  // v2.85 (AutoMatchCar: a bike for a bike)
 		// driven axles as the BeamNG mod found them (from the car's powertrain)
 		int bits = 0, known = 0;
 		for (const car::Wheel& w : model->wheels) {
@@ -3588,6 +3617,8 @@ namespace
 		double                                        base[3] = {}, noteT = 0;
 	} g_seat;
 
+	bool g_menuOpen = false;  // v2.85: the in-game menu has the keyboard (nothing goes to BeamNG)
+
 	// keys held now, BeamNG names, spaced (" up x "), without GTA's own (KeysAlwaysGta) and the plugin's keys
 	std::string ReadKeys()
 	{
@@ -3597,7 +3628,10 @@ namespace
 		if ((GetAsyncKeyState(g_cfg.key) & 0x8000) || (GetAsyncKeyState(g_cfg.driveKey) & 0x8000)) return out;
 		for (int vk = 1; vk < 256; ++vk) {
 			const char* n = g_in.keyName[vk];
-			if (!n || vk == g_cfg.key || vk == g_cfg.driveKey) continue;
+			if (!n || vk == g_cfg.key || vk == g_cfg.driveKey || vk == g_cfg.menuKey) continue;
+			// v2.85: the menu's keys are the menu's while it's open (the rest still drive)
+			if (g_menuOpen && (vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT || vk == VK_RETURN || vk == VK_BACK || (vk >= VK_NUMPAD2 && vk <= VK_NUMPAD8)))
+				continue;
 			if (g_seat.on && (vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT || vk == VK_PRIOR || vk == VK_NEXT)) continue;  // (v2.72: seat adjust)
 			if (!(GetAsyncKeyState(vk) & 0x8000)) continue;
 			if (g_cfg.keysAlwaysGta.find(std::string(" ") + n + " ") != std::string::npos) continue;
@@ -10455,6 +10489,7 @@ namespace
 	// its speed changes and it takes a dent there), people are knocked down and hurt, riders knocked off their bikes. The numbers
 	// are in GtaBeamD1_traffic.json (written next to the ini the first time; Ctrl+F11 reads it again). TrafficCollision=0: off.
 	// ---------------------------------------------------------------------------------------
+	constexpr double kPxBikeBoxM = 2.8;  // v2.85: a proxy box shorter than this is a bike box (GTA motorcycles and bicycles only)
 	const char* kTrafficDefault = R"JSON({
   "about": "GTA x Beam v2.7 traffic: how GTA's cars and people and BeamNG's car push each other when they touch. Ctrl+F11 in game reads it again.",
   "rangeM": 40,
@@ -10479,8 +10514,8 @@ namespace
   "twinDentScale": 1.0,
   "twinDentMaxM": 0.35,
   "twinStillS": 2.0,
-  "proxyAbout": "v2.83 (TrafficProxies in the ini: how many): boxes in BeamNG that take a GTA car's place just before it meets yours while PuppetSolid is on, so BeamNG resolves that crash and your car really crumples. Each entry: box:width:length:height:kg (m). The GTA car gets the free box closest to it in length. twinLeadS, twinStillS and TwinMaxLengthM are used for them too.",
-  "proxyPool": ["box:1.9:4.7:1.45:1500", "box:1.8:4.1:1.45:1250", "box:2.05:5.2:1.8:2200", "box:1.9:4.7:1.45:1500"]
+  "proxyAbout": "v2.83 (TrafficProxies in the ini: how many): boxes in BeamNG that take a GTA car's place just before it meets yours while PuppetSolid is on, so BeamNG resolves that crash and your car really crumples. Each entry: box:width:length:height:kg (m). The GTA car gets the free box closest to it in length. v2.85: a box shorter than 2.8 m is a bike box: only GTA motorcycles and bicycles get it (and only they: a bike gets no car box), and a hard hit on it knocks the rider off; with no bike box in the pool, bikes crash the 2.82 way. twinLeadS, twinStillS and TwinMaxLengthM are used for them too.",
+  "proxyPool": ["box:1.9:4.7:1.45:1500", "box:1.8:4.1:1.45:1250", "box:2.05:5.2:1.8:2200", "box:1.9:4.7:1.45:1500", "box:0.8:2.2:1.2:250"]
 }
 )JSON";
 	struct TrafficState
@@ -10513,6 +10548,7 @@ namespace
 			double      tFirst = 0, hitT = 0, hitDv = 0;
 			uint32_t    settle = 0;
 			bool        hit = false, meet = false;  // meet: its GTA car's box and BeamNG's car's touch now, or will within twinLeadS
+			bool        bike = false, knocked = false;  // v2.85: a GTA motorcycle / bicycle on a bike-size box; its rider knocked off by the hit
 			// v2.74: its poses (GTA's world) on BeamNG's clock: drawn at the same moment as your car (your v2.73 test: twinned cars
 			// "get the old camera lag glitch": each pose was set as it came in, then GTA moved the car on, then the next one snapped it back)
 			struct Pose
@@ -10670,6 +10706,7 @@ namespace
 		tw.tFirst = tw.hitT = tw.hitDv = 0;
 		tw.settle = 0;
 		tw.hit = tw.meet = false;
+		tw.bike = tw.knocked = false;  // v2.85
 		++T.twRel;
 	}
 	void TwinsEnd(TrafficState& T, const char* why)
@@ -10929,6 +10966,18 @@ namespace
 									++T.pxHits;
 									PxHitLog(T, k);
 								}
+								// v2.85: a GTA bike's box hit hard enough: its rider comes off (GTA would throw him in its own crash)
+								if (tw.bike && !tw.knocked && tw.hitDv > T.riderKnock * 0.5) {
+									tw.knocked = true;
+									const int rider = tw.ent ? Call<int>(N::GET_PED_IN_VEHICLE_SEAT, tw.ent, -1, 0) : 0;
+									if (rider && !Call<int>(N::IS_PED_A_PLAYER, rider)) {
+										TrafficHold(T, rider);
+										CallVoid(N::KNOCK_PED_OFF_VEHICLE, rider);
+										Call<int>(N::SET_PED_TO_RAGDOLL, rider, 2000, 4000, 0, 0, 0, 0);
+										++T.riders;
+										if (T.logs++ < 200) Log("proxy (v2.85): bike box %d hit (%.1f km/h): its rider knocked off GTA bike %d", k + 1, tw.hitDv * 3.6, tw.ent);
+									}
+								}
 							}
 						}
 					}
@@ -11169,7 +11218,9 @@ namespace
 				// the cars only passed close); for those 0.8 s GTA's car was BeamNG's coasting twin (no driver), then let go
 				const NVec3  ve0 = Call<NVec3>(N::GET_ENTITY_VELOCITY, e);
 				const int    cls = std::clamp(Call<int>(N::GET_VEHICLE_CLASS, e), 0, 22);
-				const bool   kind = cls != 8 && cls != 13 && cls != 14 && cls != 15 && cls != 16 && cls != 21;  // (not bikes, boats, aircraft, trains)
+				// (not boats, aircraft, trains; v2.85: bikes too with boxes, on a bike-size box (shorter than kPxBikeBoxM) when the pool has one)
+				const bool   bikeE = cls == 8 || cls == 13;
+				const bool   kind = (px && bikeE) || (!bikeE && cls != 14 && cls != 15 && cls != 16 && cls != 21);
 				auto         flat = [](const double* v, double* o) {
                     const double l2 = sqrt(v[0] * v[0] + v[1] * v[1]);
                     o[0] = l2 > 1e-6 ? v[0] / l2 : 1.0;
@@ -11197,8 +11248,11 @@ namespace
 				auto dn = T.twDone.find(e);
 				if (twK >= 0 || (dn != T.twDone.end() && now - dn->second < 2.0)) continue;
 				int best = -1;
-				for (size_t k = 0; meetT >= 0 && k < T.twins.size(); ++k)
-					if (T.twins[k].state == 1 && (best < 0 || fabs(T.twins[k].l - 2 * he[1]) < fabs(T.twins[best].l - 2 * he[1]))) best = int(k);
+				for (size_t k = 0; meetT >= 0 && k < T.twins.size(); ++k) {
+					if (T.twins[k].state != 1) continue;
+					if (px && (T.twins[k].l < kPxBikeBoxM) != bikeE) continue;  // v2.85: a bike box for a bike, a car box for a car
+					if (best < 0 || fabs(T.twins[k].l - 2 * he[1]) < fabs(T.twins[best].l - 2 * he[1])) best = int(k);
+				}
 				// v2.72: the twin (its own size) must fit where GTA's car is: not into your car or another twin (your v2.71 test: GTA cars
 				// crushed "by your presence": a twin put half inside your car is torn apart by BeamNG). Too late to fit: v2.7's push
 				if (best >= 0) {
@@ -11248,6 +11302,8 @@ namespace
 					tw.posed = false;
 					tw.poses = tw.stale = 0;
 					tw.applied.clear();
+					tw.bike = bikeE;  // v2.85
+					tw.knocked = false;
 					memcpy(tw.mc, mc, sizeof(tw.mc));
 					tw.mnz = mn.z;
 					tw.gw = mx.x - mn.x;
@@ -14390,6 +14446,616 @@ namespace
 		}
 	}
 
+	// ---------------------------------------------------------------------------------------
+	// v2.85 (OpenGTANG): AutoMatchCar. GTA's world hits the hidden GTA car, not the drawn BeamNG car, so the two should be
+	// the same size (the README's first tip). With AutoMatchCar=1, F11 swaps the GTA car for the GTA model closest to
+	// BeamNG's car in size (width, length, height; a motorcycle for a BeamNG bike), at the same place, heading and speed,
+	// you in its seat. GTA's model sizes are measured once (each model loaded for a moment) and kept in
+	// GtaBeamD1_carsizes.txt, so later matches are instant. AutoMatchModels in the ini: the models it picks from.
+	// ---------------------------------------------------------------------------------------
+	const char* kAutoMatchDefault =
+		// compacts, sedans, coupes
+		"panto,issi2,brioso,blista,dilettante,prairie,rhapsody,asea,premier,primo,fugitive,tailgater,schafter2,washington,stanier,emperor,intruder,"
+		"stratum,glendale,warrener,superd,oracle,felon,jackal,f620,sentinel,zion,exemplar,windsor,"
+		// muscle, sports, super
+		"dominator,gauntlet,buccaneer,sabregt,phoenix,vigero,dukes,sultan,buffalo,banshee,elegy2,comet2,feltzer2,carbonizzare,ninef,massacro,jester,"
+		"coquette,surano,zentorno,infernus,adder,entityxf,turismor,t20,osiris,"
+		// SUVs, off-road, vans, pickups
+		"baller,cavalcade,granger,dubsta,landstalker,seminole,huntley,patriot,serrano,radi,rocoto,gresley,xls,mesa,rebel2,sandking2,sandking,bifta,"
+		"kalahari,bodhi2,dubsta3,bison,burrito3,speedo,rumpo,minivan,youga,surfer,sadler,bobcatxl,mule,benson,"
+		// motorcycles
+		"bati,akuma,pcj,sanchez,sanchez2,hexer,double,ruffian,vader,faggio2,daemon,bagger,nemesis,carbonrs,hakuchou,enduro,innovation,thrust,"
+		"lectro,vindicator,sovereign,bf400,gargoyle,cliffhanger";
+
+	struct AmSize
+	{
+		float w = 0, l = 0, h = 0;
+		int   cls = -1;  // GTA's vehicle class; -1 not in this game
+	};
+	struct AutoMatchState
+	{
+		int                                          state = 0;  // 0 idle, 1 measuring GTA's sizes, 2 loading the pick
+		bool                                         cacheRead = false;
+		std::map<std::string, AmSize>                size;
+		std::vector<std::string>                     todo;
+		std::vector<std::pair<std::string, double>>  loading;  // models requested, when
+		int                                          veh = 0;
+		std::string                                  pick;
+		double                                       t0 = 0, tPick = 0;
+		int                                          measured = 0;
+	} g_am;
+
+	std::vector<std::string> AutoMatchList()
+	{
+		std::vector<std::string> out;
+		const std::string&       s = g_cfg.autoMatchModels.empty() ? std::string(kAutoMatchDefault) : g_cfg.autoMatchModels;
+		size_t                   a = 0;
+		while (a <= s.size()) {
+			size_t b = s.find(',', a);
+			if (b == std::string::npos) b = s.size();
+			std::string n;
+			for (size_t i = a; i < b; ++i)
+				if (!isspace((unsigned char)s[i])) n += char(tolower((unsigned char)s[i]));
+			if (!n.empty() && std::find(out.begin(), out.end(), n) == out.end()) out.push_back(n);
+			a = b + 1;
+		}
+		return out;
+	}
+
+	void AutoMatchCache(bool write)
+	{
+		char path[MAX_PATH + 16];
+		PathNextToModule("_carsizes.txt", path, sizeof(path));
+		if (!write) {
+			g_am.cacheRead = true;
+			FILE* f = fopen(path, "r");
+			if (!f) return;
+			char line[160];
+			while (fgets(line, sizeof(line), f)) {
+				char   name[64];
+				AmSize z;
+				if (line[0] != '#' && sscanf(line, "%63s %f %f %f %d", name, &z.w, &z.l, &z.h, &z.cls) == 5) g_am.size[name] = z;
+			}
+			fclose(f);
+			Log("auto-match (v2.85): %zu GTA model sizes read from %s", g_am.size.size(), path);
+			return;
+		}
+		FILE* f = fopen(path, "w");
+		if (!f) return;
+		fprintf(f, "# GTA x Beam (OpenGTANG) v2.85: GTA model sizes for AutoMatchCar (name width length height class; class -1: not in this game). Delete to measure again.\n");
+		for (const auto& kv : g_am.size) fprintf(f, "%s %.3f %.3f %.3f %d\n", kv.first.c_str(), kv.second.w, kv.second.l, kv.second.h, kv.second.cls);
+		fclose(f);
+	}
+
+	// the kinds that fit: a motorcycle for a BeamNG bike, a car / SUV / van / truck otherwise (no bicycles, boats, aircraft, trains)
+	bool AutoMatchKind(int cls, bool bike)
+	{
+		if (bike) return cls == 8;
+		return cls >= 0 && cls != 8 && cls != 13 && cls != 14 && cls != 15 && cls != 16 && cls != 21;
+	}
+
+	double AutoMatchScore(float w, float l, float h)
+	{
+		const double W = g_modelSize[0].load(), L = g_modelSize[1].load(), H = g_modelSize[2].load();
+		return fabs(l - L) + 1.5 * fabs(w - W) + 0.75 * fabs(h - H);  // (width counts most for scrapes, length for front / rear hits)
+	}
+
+	bool AutoMatchBike()
+	{
+		const int nw = g_modelWheels.load();
+		return nw == 2 || (nw <= 0 && g_modelSize[0].load() < 1.2f);
+	}
+
+	void AutoMatchStart(int veh)
+	{
+		if (!veh || g_showVeh.count(veh) || !g_haveModel.load()) {
+			Attach(veh);  // (its own message: no car / a show car / no BeamNG car yet)
+			return;
+		}
+		const int ped = Call<int>(N::PLAYER_PED_ID);
+		const int drv = Call<int>(N::GET_PED_IN_VEHICLE_SEAT, veh, -1, 0);
+		if (drv && drv != ped) {
+			Log("auto-match (v2.85): GTA car %d has someone else at the wheel: not swapped", veh);
+			Attach(veh);
+			return;
+		}
+		if (!g_am.cacheRead) AutoMatchCache(false);
+		g_am.veh = veh;
+		g_am.todo.clear();
+		g_am.loading.clear();
+		for (const std::string& n : AutoMatchList())
+			if (!g_am.size.count(n)) g_am.todo.push_back(n);
+		g_am.state = 1;
+		g_am.t0 = NowSeconds();
+		g_am.measured = 0;
+		if (!g_am.todo.empty()) Notify("Auto-match: measuring %zu GTA models (first time only, a few seconds)...", g_am.todo.size());
+	}
+
+	void AutoMatchSwap()
+	{
+		int          veh = g_am.veh;
+		const auto   pz = g_am.size[g_am.pick];
+		const uint32_t hash = Joaat(g_am.pick.c_str());
+		const int    ped = Call<int>(N::PLAYER_PED_ID);
+		const bool   inIt = Call<int>(N::GET_VEHICLE_PED_IS_IN, ped, 0) == veh;
+		const NVec3  p = Call<NVec3>(N::GET_ENTITY_COORDS, veh, 1);
+		const NVec3  v = Call<NVec3>(N::GET_ENTITY_VELOCITY, veh);
+		const float  hd = Call<float>(N::GET_ENTITY_HEADING, veh);
+		NVec3        mn{}, mx{}, nmn{}, nmx{};
+		CallVoid(N::GET_MODEL_DIMENSIONS, Call<unsigned>(N::GET_ENTITY_MODEL, veh), &mn, &mx);
+		CallVoid(N::GET_MODEL_DIMENSIONS, hash, &nmn, &nmx);
+		const char* oldName = Call<const char*>(N::GET_DISPLAY_NAME_FROM_VEHICLE_MODEL, Call<unsigned>(N::GET_ENTITY_MODEL, veh));
+		const std::string was = oldName ? oldName : "?";
+		CallVoid(N::SET_ENTITY_COLLISION, veh, 0, 0);  // (the new car comes in at the same spot)
+		const int nv = Call<int>(N::CREATE_VEHICLE, hash, p.x, p.y, p.z + (mn.z - nmn.z) + 0.05f, hd, 0, 1, 0);
+		CallVoid(N::SET_MODEL_AS_NO_LONGER_NEEDED, hash);
+		if (!nv || !Call<int>(N::DOES_ENTITY_EXIST, nv)) {
+			CallVoid(N::SET_ENTITY_COLLISION, veh, 1, 0);
+			Log("auto-match (v2.85): GTA wouldn't make a %s: the car you have stays", g_am.pick.c_str());
+			Notify("Auto-match: couldn't spawn %s, kept your car.", g_am.pick.c_str());
+			Attach(veh);
+			return;
+		}
+		const double spd = sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+		if (spd < 1.0) CallVoid(N::SET_VEHICLE_ON_GROUND_PROPERLY, nv, 5.0f);
+		if (inIt) CallVoid(N::SET_PED_INTO_VEHICLE, ped, nv, -1);
+		CallVoid(N::SET_VEHICLE_ENGINE_ON, nv, 1, 1, 0);
+		CallVoid(N::SET_VEHICLE_HAS_BEEN_OWNED_BY_PLAYER, nv, 1);
+		if (spd >= 1.0) CallVoid(N::SET_ENTITY_VELOCITY, nv, v.x, v.y, v.z);
+		// the old car goes (when nobody else is in it); someone's in it: it stays, solid again
+		if (Call<int>(N::GET_VEHICLE_NUMBER_OF_PASSENGERS, veh, 1, 1) == 0) {
+			CallVoid(N::SET_ENTITY_AS_MISSION_ENTITY, veh, 1, 1);
+			CallVoid(N::DELETE_VEHICLE, &veh);
+		} else {
+			CallVoid(N::SET_ENTITY_COLLISION, veh, 1, 0);
+		}
+		if (inIt) {
+			int keep = nv;
+			CallVoid(N::SET_VEHICLE_AS_NO_LONGER_NEEDED, &keep);  // (yours while you're in it, GTA's to clear up after, like any car you take)
+		}
+		const char* nn = Call<const char*>(N::GET_DISPLAY_NAME_FROM_VEHICLE_MODEL, hash);
+		Log("auto-match (v2.85): BeamNG's car %.2f x %.2f x %.2f m (%s): GTA %s (%s, %.2f x %.2f x %.2f m, class %d) in place of %s, %s", g_modelSize[0].load(),
+			g_modelSize[1].load(), g_modelSize[2].load(), AutoMatchBike() ? "a bike" : "a car", g_am.pick.c_str(), nn ? nn : "?", pz.w, pz.l, pz.h, pz.cls, was.c_str(),
+			inIt ? "you in its seat" : "where it stood");
+		Notify("Auto-match: %s (%.1f m long) for your BeamNG car (%.1f m).", nn ? nn : g_am.pick.c_str(), pz.l, g_modelSize[1].load());
+		Attach(nv);
+	}
+
+	void AutoMatchChoose()
+	{
+		const bool bike = AutoMatchBike();
+		std::string best;
+		double      bestS = 1e9;
+		for (const std::string& n : AutoMatchList()) {
+			auto it = g_am.size.find(n);
+			if (it == g_am.size.end() || !AutoMatchKind(it->second.cls, bike)) continue;
+			const double s = AutoMatchScore(it->second.w, it->second.l, it->second.h);
+			if (s < bestS) bestS = s, best = n;
+		}
+		const int veh = g_am.veh;
+		g_am.state = 0;
+		if (best.empty()) {
+			Log("auto-match (v2.85): no GTA %s in AutoMatchModels: the car you have stays", bike ? "motorcycle" : "car");
+			Notify("Auto-match: no GTA %s to pick from (AutoMatchModels).", bike ? "motorcycle" : "car");
+			Attach(veh);
+			return;
+		}
+		// the car you have, scored the same way: kept when it's (about) as good
+		const unsigned model = Call<unsigned>(N::GET_ENTITY_MODEL, veh);
+		NVec3          mn{}, mx{};
+		CallVoid(N::GET_MODEL_DIMENSIONS, model, &mn, &mx);
+		const int    cls = Call<int>(N::GET_VEHICLE_CLASS, veh);
+		const double cur = AutoMatchScore(mx.x - mn.x, mx.y - mn.y, mx.z - mn.z);
+		if (AutoMatchKind(cls, bike) && (model == Joaat(best.c_str()) || cur <= bestS + g_cfg.autoMatchKeepM)) {
+			Log("auto-match (v2.85): the GTA car you have scores %.2f, the best (%s) %.2f: kept", cur, best.c_str(), bestS);
+			Attach(veh);
+			return;
+		}
+		g_am.pick = best;
+		g_am.state = 2;
+		g_am.tPick = NowSeconds();
+		CallVoid(N::REQUEST_MODEL, Joaat(best.c_str()));
+		Log("auto-match (v2.85): picked %s (score %.2f; the car you have: %.2f)", best.c_str(), bestS, cur);
+	}
+
+	void AutoMatchTick()
+	{
+		if (g_am.state == 0) return;
+		const double now = NowSeconds();
+		if (!g_am.veh || !Call<int>(N::DOES_ENTITY_EXIST, g_am.veh) || g_drv.state != 0) {
+			for (const auto& l : g_am.loading) CallVoid(N::SET_MODEL_AS_NO_LONGER_NEEDED, Joaat(l.first.c_str()));
+			g_am.loading.clear();
+			g_am.state = 0;
+			Notify("Auto-match: stopped (the car is gone or drive mode is on).");
+			return;
+		}
+		if (g_am.state == 1) {
+			for (size_t i = 0; i < g_am.loading.size();) {
+				const std::string n = g_am.loading[i].first;
+				const uint32_t    h = Joaat(n.c_str());
+				const bool        ok = Call<int>(N::HAS_MODEL_LOADED, h) != 0;
+				if (!ok && now - g_am.loading[i].second < 5.0) {
+					CallVoid(N::REQUEST_MODEL, h);
+					++i;
+					continue;
+				}
+				if (ok) {
+					NVec3 mn{}, mx{};
+					CallVoid(N::GET_MODEL_DIMENSIONS, h, &mn, &mx);
+					AmSize z;
+					z.w = mx.x - mn.x, z.l = mx.y - mn.y, z.h = mx.z - mn.z;
+					z.cls = std::clamp(Call<int>(N::GET_VEHICLE_CLASS_FROM_NAME, h), 0, 22);
+					g_am.size[n] = z;
+					++g_am.measured;
+				} else {
+					Log("auto-match (v2.85): %s didn't load in 5 s: left out this time", n.c_str());
+				}
+				CallVoid(N::SET_MODEL_AS_NO_LONGER_NEEDED, h);
+				g_am.loading.erase(g_am.loading.begin() + i);
+			}
+			while (g_am.loading.size() < 6 && !g_am.todo.empty()) {
+				const std::string n = g_am.todo.back();
+				g_am.todo.pop_back();
+				const uint32_t h = Joaat(n.c_str());
+				if (!Call<int>(N::IS_MODEL_IN_CDIMAGE, h) || !Call<int>(N::IS_MODEL_A_VEHICLE, h)) {
+					g_am.size[n] = AmSize{};  // (not a GTA vehicle in this game: remembered as such)
+					Log("auto-match (v2.85): '%s' is not a GTA vehicle model here: skipped", n.c_str());
+					continue;
+				}
+				CallVoid(N::REQUEST_MODEL, h);
+				g_am.loading.push_back({ n, now });
+			}
+			if (g_am.todo.empty() && g_am.loading.empty()) {
+				if (g_am.measured > 0) {
+					AutoMatchCache(true);
+					Log("auto-match (v2.85): %d GTA models measured in %.1f s", g_am.measured, now - g_am.t0);
+				}
+				AutoMatchChoose();
+			}
+			return;
+		}
+		// state 2: the pick loading
+		const uint32_t h = Joaat(g_am.pick.c_str());
+		if (Call<int>(N::HAS_MODEL_LOADED, h)) {
+			g_am.state = 0;
+			AutoMatchSwap();
+		} else if (now - g_am.tPick > 6.0) {
+			g_am.state = 0;
+			CallVoid(N::SET_MODEL_AS_NO_LONGER_NEEDED, h);
+			Notify("Auto-match: %s didn't load, kept your car.", g_am.pick.c_str());
+			Attach(g_am.veh);
+		} else {
+			CallVoid(N::REQUEST_MODEL, h);
+		}
+	}
+
+	// ---------------------------------------------------------------------------------------
+	// F11's cycle and Ctrl+F11 (shared with the menu)
+	// ---------------------------------------------------------------------------------------
+	void F11Cycle()
+	{
+		if (g_am.state != 0) {
+			for (const auto& l : g_am.loading) CallVoid(N::SET_MODEL_AS_NO_LONGER_NEEDED, Joaat(l.first.c_str()));
+			g_am.loading.clear();
+			g_am.state = 0;
+			Notify("Auto-match: cancelled.");
+		} else if (g_drv.state != 0) {
+			DriveStop("F11", true);  // v2.0: F11 first ends drive mode
+		} else if (g_tgt.mode == 0) {
+			if (g_cfg.autoMatch) AutoMatchStart(FindTargetCar());  // v2.85
+			else Attach();
+		} else if (g_tgt.mode == 1) {
+			g_tgt.mode = 2;
+			SetVisible(g_tgt.veh, true);
+			Notify("D1: GTA car shown too (compare). F11 again: detach.");
+		} else {
+			Detach("key");
+			Notify("D1: detached, GTA car back to normal.");
+		}
+	}
+
+	void ReloadAll()
+	{
+		LoadConfig();  // placement/look/shadow/hide settings can be tuned in the ini, then Ctrl+F11
+		LoadSurfaces();  // v2.4: GtaBeamD1_surfaces.json (tiles sent from now on use it)
+		g_props.cfgLoaded = false;  // v2.5: GtaBeamD1_props.json read again
+		g_wpn.cfgLoaded = false;    // v2.6: GtaBeamD1_weapons.json too
+		g_traffic.cfgLoaded = false;  // v2.7: GtaBeamD1_traffic.json too
+		if (g_tgt.mode == 1) {
+			SetVisible(g_tgt.veh, false);  // the hide mode may have changed
+		}
+		Notify("D1: ini re-read (shadows %s, sun offset %.0f deg, reflections %s, wheels %s, debug view %d).", ShadowName(g_cfg.shadowMode), g_cfg.sunAzimuth,
+			g_cfg.environment ? "from GTA's world" : "made-up sky", WheelSrcName(g_cfg.wheelSource), g_cfg.debugView);
+	}
+
+	// ---------------------------------------------------------------------------------------
+	// v2.85 (OpenGTANG): the in-game menu (MenuKey, F7). Up / Down pick, Left / Right change, Enter does or switches,
+	// Backspace or F7 closes. A change is used at once and written to GtaBeamD1.ini (the line with its name; the
+	// comments stay). The settings drive mode reads when it starts are locked while you drive.
+	// ---------------------------------------------------------------------------------------
+	struct MenuItem
+	{
+		int         kind;    // 0 header, 1 action, 2 on/off, 3 number
+		const char* label;
+		const char* ini;     // its ini name (nullptr: not saved)
+		bool*       b;
+		float*      f;
+		int*        i;
+		float       lo, hi, step;
+		bool        idleOnly;  // drive mode reads it at F10: not while driving
+		void        (*act)();
+		bool        (*get)();       // on/off kept somewhere else
+		void        (*set)(bool);
+		const char* help;
+	};
+
+	struct MenuState
+	{
+		int    sel = 1, top = 0;
+		double holdT = 0, repT = 0;
+		int    holdVk = 0;
+		bool   keyWas[256] = {};
+		char   note[160] = "";
+		double noteT = 0;
+	} g_menu;
+
+	void MenuNote(const char* fmt, ...)
+	{
+		va_list ap;
+		va_start(ap, fmt);
+		vsnprintf(g_menu.note, sizeof(g_menu.note), fmt, ap);
+		va_end(ap);
+		g_menu.noteT = NowSeconds();
+	}
+
+	void MenuMatchNow()
+	{
+		if (g_drv.state != 0) {
+			MenuNote("Stop driving first (%s).", KeyName(g_cfg.driveKey));
+			return;
+		}
+		if (!g_haveModel.load()) {
+			MenuNote("No BeamNG car yet: Get car from BeamNG first.");
+			return;
+		}
+		if (g_tgt.mode != 0) Detach("auto-match from the menu");
+		AutoMatchStart(FindTargetCar());
+	}
+	void MenuDrive()
+	{
+		if (g_drv.state != 0) DriveStop("menu", true);
+		else DriveStart();
+	}
+	void MenuSeat()
+	{
+		if (g_drv.state == 0) {
+			MenuNote("Seat adjust works in drive mode.");
+			return;
+		}
+		g_menuOpen = false;
+		SeatAdjustToggle();
+	}
+	void MenuExport() { StartWorker(Job::Export); }
+	void MenuClose() { g_menuOpen = false; }
+	bool MenuHurtGet() { return CrashHurtOn(); }
+	void MenuHurtSet(bool on)
+	{
+		g_crashHurtOn.store(on ? 1 : 0);
+		g_cfg.crashHurt = on;
+		Log("crash damage to you: %s (menu)", on ? "ON" : "OFF");
+	}
+
+	std::vector<MenuItem> MenuItems()
+	{
+		Config& c = g_cfg;
+		auto H = [](const char* l) { return MenuItem{ 0, l, nullptr, nullptr, nullptr, nullptr, 0, 0, 0, false, nullptr, nullptr, nullptr, "" }; };
+		auto A = [](const char* l, void (*a)(), const char* h) { return MenuItem{ 1, l, nullptr, nullptr, nullptr, nullptr, 0, 0, 0, false, a, nullptr, nullptr, h }; };
+		auto B = [](const char* l, const char* ini, bool* b, bool idle, const char* h) { return MenuItem{ 2, l, ini, b, nullptr, nullptr, 0, 1, 1, idle, nullptr, nullptr, nullptr, h }; };
+		auto F = [](const char* l, const char* ini, float* f, float lo, float hi, float st, bool idle, const char* h) {
+			return MenuItem{ 3, l, ini, nullptr, f, nullptr, lo, hi, st, idle, nullptr, nullptr, nullptr, h };
+		};
+		auto I = [](const char* l, const char* ini, int* i, int lo, int hi, bool idle, const char* h) {
+			return MenuItem{ 3, l, ini, nullptr, nullptr, i, float(lo), float(hi), 1, idle, nullptr, nullptr, nullptr, h };
+		};
+		std::vector<MenuItem> m;
+		m.push_back(H("Car"));
+		m.push_back(A("Get car from BeamNG", MenuExport, "Shift+F11: exports the car you're in in BeamNG."));
+		m.push_back(A("Put on / show / take off", F11Cycle, "F11: puts the BeamNG car on your GTA car, then shows both, then takes it off."));
+		m.push_back(A("Drive mode on / off", MenuDrive, "F10: BeamNG's physics drive the car."));
+		m.push_back(B("Auto-match hidden car", "AutoMatchCar", &c.autoMatch, false, "F11 swaps your GTA car for a GTA model of your BeamNG car's size."));
+		m.push_back(A("Match hidden car now", MenuMatchNow, "Picks the GTA car closest to your BeamNG car's size and puts the car on it."));
+		m.push_back(H("Crashes and world"));
+		{
+			MenuItem h = B("Crash damage to you", "CrashHurt", nullptr, false, "Ctrl+F9: crashes hurt you.");
+			h.get = MenuHurtGet;
+			h.set = MenuHurtSet;
+			m.push_back(h);
+		}
+		m.push_back(B("GTA's world reacts", "PuppetSolid", &c.puppetSolid, true, "GTA's traffic, people and props react to your car the GTA way."));
+		m.push_back(I("Traffic crash boxes", "TrafficProxies", &c.trafficProxies, 0, 8, true, "Boxes in BeamNG that take a GTA car's place, so traffic crashes crumple your car."));
+		m.push_back(B("Weapons hit the car", "Weapons", &c.weapons, false, "Bullets and explosions dent the car and hurt you."));
+		m.push_back(B("Props react", "Props", &c.props, false, "Lamp posts, signs and bins react to the car."));
+		m.push_back(B("Dents shown", "Dents", &c.dents, true, "BeamNG's dents and bent parts on the drawn car."));
+		m.push_back(H("Driving"));
+		m.push_back(F("BeamNG gravity", "DriveGravity", &c.driveGravity, 0.5f, 3.0f, 0.05f, true, "How heavy the car feels (x BeamNG's own)."));
+		m.push_back(B("Speed gauge", "DriveGauge", &c.gauge, false, "Speed, gear and revs, bottom right."));
+		m.push_back(B("Gauge in km/h", "DriveGaugeUnits", &c.gaugeKmh, false, "Off: mph."));
+		m.push_back(B("Drive check text", "DriveCheckText", &c.driveHud, false, "Shift+F10: what goes to BeamNG and back."));
+		m.push_back(B("Pause sync", "PauseSync", &c.pauseSync, false, "Pausing one game pauses the other."));
+		m.push_back(B("Tyre smoke", "TireSmoke", &c.tireSmoke, false, "GTA's smoke at wheels that spin or slide."));
+		m.push_back(A("Seat adjust", MenuSeat, "Ctrl+Shift+F10 in drive mode: arrows and Page Up / Down, again to save."));
+		m.push_back(H("Bikes"));
+		m.push_back(F("Lean steer", "BikeLeanSteer", &c.bikeLeanSteer, -1.0f, 1.0f, 0.1f, false, "How GTA leans its bike and rider to BeamNG's lean. 0 off, -1 the other way."));
+		m.push_back(F("Full lean (deg)", "BikeLeanFullDeg", &c.bikeLeanFullDeg, 5.0f, 80.0f, 5.0f, false, "The BeamNG lean that gives the full lean steer."));
+		m.push_back(F("Lean feedback", "BikeLeanFeedback", &c.bikeLeanFeedback, 0.0f, 5.0f, 0.25f, false, "Extra steer from the gap between GTA's lean and BeamNG's."));
+		m.push_back(H("Other"));
+		m.push_back(A("Reload ini and json", ReloadAll, "Ctrl+F11: reads GtaBeamD1.ini and the json files again."));
+		m.push_back(A("Close", MenuClose, "Backspace or F7 closes the menu too."));
+		return m;
+	}
+
+	void MenuSave(const MenuItem& it)
+	{
+		if (!it.ini) return;
+		char path[MAX_PATH + 8], v[32];
+		PathNextToModule(".ini", path, sizeof(path));
+		if (!strcmp(it.ini, "DriveGaugeUnits")) snprintf(v, sizeof(v), "%s", g_cfg.gaugeKmh ? "kmh" : "mph");
+		else if (it.kind == 2) snprintf(v, sizeof(v), "%d", it.get ? int(it.get()) : int(*it.b));
+		else if (it.i) snprintf(v, sizeof(v), "%d", *it.i);
+		else {
+			snprintf(v, sizeof(v), "%.2f", *it.f);
+			while (strchr(v, '.') && (v[strlen(v) - 1] == '0' || v[strlen(v) - 1] == '.')) v[strlen(v) - 1] = 0;  // 1.50 -> 1.5, 40.00 -> 40
+		}
+		WritePrivateProfileStringA(kSec, it.ini, v, path);
+		Log("menu (v2.85): %s = %s (written to the ini)", it.ini, v);
+	}
+
+	void MenuChange(const MenuItem& it, int dir)
+	{
+		if (it.idleOnly && g_drv.state != 0) {
+			MenuNote("Stop driving to change this (drive mode reads it at %s).", KeyName(g_cfg.driveKey));
+			CallVoid(N::PLAY_SOUND_FRONTEND, -1, "ERROR", "HUD_FRONTEND_DEFAULT_SOUNDSET", 0);
+			return;
+		}
+		if (it.kind == 1) {
+			if (dir != 0) return;
+			CallVoid(N::PLAY_SOUND_FRONTEND, -1, "SELECT", "HUD_FRONTEND_DEFAULT_SOUNDSET", 0);
+			it.act();
+			return;
+		}
+		if (it.kind == 2) {
+			const bool now = it.get ? it.get() : *it.b;
+			if (it.set) it.set(!now);
+			else *it.b = !now;
+		} else if (it.kind == 3) {
+			const int d = dir == 0 ? 1 : dir;
+			if (it.i) *it.i = std::clamp(*it.i + d, int(it.lo), int(it.hi));
+			else *it.f = std::clamp(float(std::round((*it.f + d * it.step) / it.step) * it.step), it.lo, it.hi);
+		}
+		CallVoid(N::PLAY_SOUND_FRONTEND, -1, "NAV_LEFT_RIGHT", "HUD_FRONTEND_DEFAULT_SOUNDSET", 0);
+		MenuSave(it);
+	}
+
+	bool MenuPressed(int vk, double now)
+	{
+		const bool down = (GetAsyncKeyState(vk) & 0x8000) != 0;
+		const bool was = g_menu.keyWas[vk];
+		g_menu.keyWas[vk] = down;
+		if (down && !was) {
+			g_menu.holdVk = vk;
+			g_menu.holdT = now;
+			g_menu.repT = now;
+			return true;
+		}
+		// held: repeats after 0.4 s, 12 a second (arrows only)
+		if (down && g_menu.holdVk == vk && now - g_menu.holdT > 0.4 && now - g_menu.repT > 0.08) {
+			g_menu.repT = now;
+			return true;
+		}
+		return false;
+	}
+
+	void MenuTick(bool paused)
+	{
+		const double now = NowSeconds();
+		const bool   focus = GtaFocused();
+		const bool   keyNow = (GetAsyncKeyState(g_cfg.menuKey) & 0x8000) != 0;
+		static bool  keyWas = false;
+		const bool   noMods = !(GetAsyncKeyState(VK_SHIFT) & 0x8000) && !(GetAsyncKeyState(VK_CONTROL) & 0x8000) && !(GetAsyncKeyState(VK_MENU) & 0x8000);
+		if (keyNow && !keyWas && focus && noMods && !paused) {
+			g_menuOpen = !g_menuOpen;
+			CallVoid(N::PLAY_SOUND_FRONTEND, -1, g_menuOpen ? "SELECT" : "BACK", "HUD_FRONTEND_DEFAULT_SOUNDSET", 0);
+			// (the keys held as it opens don't count as presses)
+			for (int vk : { VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_BACK, VK_NUMPAD8, VK_NUMPAD2, VK_NUMPAD4, VK_NUMPAD6, VK_NUMPAD5 })
+				g_menu.keyWas[vk] = (GetAsyncKeyState(vk) & 0x8000) != 0;
+		}
+		keyWas = keyNow;
+		if (!g_menuOpen || paused) return;
+		// GTA's own use of the menu's keys is off while it's open (the phone on Up, its arrows, Enter and Backspace; Esc still pauses)
+		for (int ctl : { 27, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 187, 188, 189, 190, 191, 194, 201, 202 })
+			CallVoid(N::DISABLE_CONTROL_ACTION, 0, ctl, 1);
+		std::vector<MenuItem> items = MenuItems();
+		const int             n = int(items.size());
+		g_menu.sel = std::clamp(g_menu.sel, 0, n - 1);
+		if (items[g_menu.sel].kind == 0) g_menu.sel = std::min(n - 1, g_menu.sel + 1);
+		if (focus) {
+			int move = 0, dir = -2;
+			auto either = [&](int a, int b) { const bool x = MenuPressed(a, now), y = MenuPressed(b, now); return x || y; };  // (both polled every frame)
+			if (either(VK_UP, VK_NUMPAD8)) move = -1;
+			if (either(VK_DOWN, VK_NUMPAD2)) move = 1;
+			if (either(VK_LEFT, VK_NUMPAD4)) dir = -1;
+			if (either(VK_RIGHT, VK_NUMPAD6)) dir = 1;
+			if (either(VK_RETURN, VK_NUMPAD5)) dir = 0;
+			if (MenuPressed(VK_BACK, now)) {
+				g_menuOpen = false;
+				CallVoid(N::PLAY_SOUND_FRONTEND, -1, "BACK", "HUD_FRONTEND_DEFAULT_SOUNDSET", 0);
+				return;
+			}
+			if (move) {
+				int s = g_menu.sel;
+				do s = (s + move + n) % n;
+				while (items[s].kind == 0);
+				g_menu.sel = s;
+				CallVoid(N::PLAY_SOUND_FRONTEND, -1, "NAV_UP_DOWN", "HUD_FRONTEND_DEFAULT_SOUNDSET", 0);
+			}
+			if (dir != -2) {
+				const MenuItem& it = items[g_menu.sel];
+				if (it.kind == 2 && dir != 0) {  // (left / right switch an on/off too)
+					MenuChange(it, 0);
+				} else {
+					MenuChange(it, dir);
+				}
+				if (!g_menuOpen) return;
+			}
+		}
+		// draw (left side, inside GTA's safe zone)
+		const int   rows = 16;
+		if (g_menu.sel < g_menu.top + 1) g_menu.top = std::max(0, g_menu.sel - 1);
+		if (g_menu.sel >= g_menu.top + rows) g_menu.top = g_menu.sel - rows + 1;
+		const float sz = std::clamp(Call<float>(N::GET_SAFE_ZONE_SIZE), 0.8f, 1.0f);
+		const float x0 = (1.0f - sz) * 0.5f + 0.012f, y0 = (1.0f - sz) * 0.5f + 0.02f, w = 0.25f, rh = 0.027f, th = 0.045f;
+		CallVoid(N::DRAW_RECT, x0 + w * 0.5f, y0 + th * 0.5f, w, th, 0, 128, 120, 235, 0);
+		GaugeText(x0 + 0.008f, y0 + 0.004f, 0.62f, 4, 1, 0.0f, "OpenGTANG", 255, 255, 255);
+		GaugeText(0.0f, y0 + 0.014f, 0.30f, 4, 2, x0 + w - 0.008f, "GTA x Beam " D1_VERSION, 220, 255, 250);
+		const char* st = g_am.state ? "matching the hidden car..." : g_drv.state == 2 ? "driving" : g_drv.state ? "starting drive..." : g_tgt.mode ? "on a GTA car" : !g_haveModel.load() ? "no BeamNG car yet" : "car loaded";
+		float y = y0 + th;
+		CallVoid(N::DRAW_RECT, x0 + w * 0.5f, y + rh * 0.5f, w, rh, 0, 0, 0, 220, 0);
+		GaugeText(x0 + 0.008f, y + 0.003f, 0.30f, 4, 1, 0.0f, (std::string("Status: ") + st).c_str(), 180, 230, 225);
+		y += rh;
+		for (int r = g_menu.top; r < std::min(n, g_menu.top + rows); ++r, y += rh) {
+			const MenuItem& it = items[r];
+			const bool      on = r == g_menu.sel;
+			const bool      locked = it.idleOnly && g_drv.state != 0;
+			if (it.kind == 0) {
+				CallVoid(N::DRAW_RECT, x0 + w * 0.5f, y + rh * 0.5f, w, rh, 15, 15, 15, 225, 0);
+				GaugeText(x0 + 0.008f, y + 0.004f, 0.28f, 4, 1, 0.0f, it.label, 0, 200, 185);
+				continue;
+			}
+			CallVoid(N::DRAW_RECT, x0 + w * 0.5f, y + rh * 0.5f, w, rh, on ? 235 : 0, on ? 235 : 0, on ? 235 : 0, on ? 235 : 170, 0);
+			const int tc = on ? 10 : locked ? 130 : 240;
+			GaugeText(x0 + 0.012f, y + 0.002f, 0.34f, 4, 1, 0.0f, it.label, tc, tc, tc);
+			char v[32] = "";
+			if (it.kind == 1) snprintf(v, sizeof(v), ">");
+			else if (it.kind == 2) snprintf(v, sizeof(v), "%s", (it.get ? it.get() : *it.b) ? "ON" : "OFF");
+			else if (it.i) snprintf(v, sizeof(v), "< %d >", *it.i);
+			else snprintf(v, sizeof(v), it.step < 0.1f ? "< %.2f >" : it.step < 1.0f ? "< %.1f >" : "< %.0f >", *it.f);
+			const bool isOn = it.kind == 2 && (it.get ? it.get() : *it.b);
+			GaugeText(0.0f, y + 0.002f, 0.34f, 4, 2, x0 + w - 0.010f, v, on ? 10 : isOn ? 120 : tc, on ? (isOn ? 130 : 10) : isOn ? 230 : tc, on ? 10 : isOn ? 140 : tc);
+		}
+		// the picked line's help, or a note
+		const MenuItem& it = items[g_menu.sel];
+		const bool      noteOn = g_menu.note[0] && now - g_menu.noteT < 3.0;
+		const bool      locked = it.idleOnly && g_drv.state != 0;
+		char            help[200];
+		snprintf(help, sizeof(help), "%s%s", noteOn ? g_menu.note : it.help, !noteOn && locked ? " (locked while driving)" : "");
+		CallVoid(N::DRAW_RECT, x0 + w * 0.5f, y + rh * 0.9f, w, rh * 1.8f, 0, 0, 0, 220, 0);
+		CallVoid(N::SET_TEXT_WRAP, x0 + 0.008f, x0 + w - 0.008f);
+		GaugeText(x0 + 0.008f, y + 0.003f, 0.27f, 4, 1, 0.0f, help, noteOn ? 255 : 200, noteOn ? 220 : 200, noteOn ? 120 : 200);
+		y += rh * 1.8f;
+		CallVoid(N::DRAW_RECT, x0 + w * 0.5f, y + rh * 0.5f, w, rh, 0, 128, 120, 200, 0);
+		GaugeText(x0 + 0.008f, y + 0.004f, 0.26f, 4, 1, 0.0f, "Up/Down pick   Left/Right change   Enter do   Backspace close", 230, 255, 250);
+	}
+
 	void TrecStart();  // v1.9.5 timing recording (below)
 
 	void OnKey()
@@ -14414,31 +15080,11 @@ namespace
 			ReleaseSRWLockShared(&g_shared);
 			Notify("D1 view: %s | %s", ViewModeName(m), status);
 		} else if (ctrl) {
-			LoadConfig();  // placement/look/shadow/hide settings can be tuned in the ini, then Ctrl+F11
-			LoadSurfaces();  // v2.4: GtaBeamD1_surfaces.json (tiles sent from now on use it)
-			g_props.cfgLoaded = false;  // v2.5: GtaBeamD1_props.json read again
-			g_wpn.cfgLoaded = false;    // v2.6: GtaBeamD1_weapons.json too
-			g_traffic.cfgLoaded = false;  // v2.7: GtaBeamD1_traffic.json too
-			if (g_tgt.mode == 1) {
-				SetVisible(g_tgt.veh, false);  // the hide mode may have changed
-			}
-			Notify("D1: ini re-read (shadows %s, sun offset %.0f deg, reflections %s, wheels %s, debug view %d).", ShadowName(g_cfg.shadowMode), g_cfg.sunAzimuth,
-				g_cfg.environment ? "from GTA's world" : "made-up sky", WheelSrcName(g_cfg.wheelSource), g_cfg.debugView);
+			ReloadAll();  // (v2.85: shared with the menu)
 		} else if (shift) {
 			StartWorker(Job::Export);
 		} else {
-			if (g_drv.state != 0) {
-				DriveStop("F11", true);  // v2.0: F11 first ends drive mode
-			} else if (g_tgt.mode == 0) {
-				Attach();
-			} else if (g_tgt.mode == 1) {
-				g_tgt.mode = 2;
-				SetVisible(g_tgt.veh, true);
-				Notify("D1: GTA car shown too (compare). F11 again: detach.");
-			} else {
-				Detach("key");
-				Notify("D1: detached, GTA car back to normal.");
-			}
+			F11Cycle();  // (v2.85: shared with the menu; AutoMatchCar)
 		}
 	}
 
@@ -14859,6 +15505,8 @@ namespace
 		DentsTick();           // v2.5: BeamNG's dents on the drawn car
 		DriveHud(paused);      // v2.01
 		DriveGauge(paused);    // v2.1
+		AutoMatchTick();       // v2.85 (OpenGTANG)
+		MenuTick(paused);      // v2.85 (OpenGTANG): the in-game menu
 		PairCar(c);  // v1.9.6
 		CamSync(c);
 		TrecFinishIfDue();

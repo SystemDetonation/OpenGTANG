@@ -2,6 +2,8 @@
 
 **Drive BeamNG.drive's soft-body cars in GTA V's world.**
 
+> **OpenGTANG** is a fork of [Treto420's GTA x Beam](https://github.com/Treto420/GTANG) (MIT). It adds motorcycles (2.84), an in-game menu, hidden-car auto-match and crash boxes for GTA's bikes (2.85). Everything else below is the original mod's.
+
 GTA V runs the world, the walking and the guns. BeamNG.drive runs the car. Both games run at the same time and talk to each other on your PC. In GTA you see and drive your BeamNG car, with its real crumple, on GTA's streets, and GTA's traffic, people and lamp posts react to it like they would to a normal GTA car.
 
 > Single-player only (story mode). Script Hook V closes GTA V in GTA Online. Free, non-commercial fan project; not affiliated with Rockstar Games or BeamNG GmbH.
@@ -23,6 +25,7 @@ GTA V runs the world, the walking and the guns. BeamNG.drive runs the car. Both 
 ## Keys (in GTA)
 | Key | What it does |
 |---|---|
+| **F7** | In-game menu (2.85): the main switches and actions, saved to the ini as you change them |
 | **Shift+F11** | Get the car from BeamNG (export). Do it again after you change the car in BeamNG. |
 | **F11** | Put the BeamNG car on the GTA car you're in or next to (press again to take it off) |
 | **F10** | Drive mode on/off: BeamNG's physics drive the car |
@@ -38,7 +41,8 @@ GTA V runs the world, the walking and the guns. BeamNG.drive runs the car. Both 
 Driving uses your own BeamNG controls and bindings (gears, clutch, drive modes).
 
 ## Tips
-- **Pick a GTA car the same size as your BeamNG car.** GTA's traffic, people and props hit an invisible GTA car hidden under your BeamNG car. If the GTA car is smaller, things go into your BeamNG car before they react; if it's bigger, they react before they touch it. A trainer such as Menyoo makes it easy to spawn the right one (a sedan for a sedan, a jeep for a lifted truck).
+- **Pick a GTA car the same size as your BeamNG car.** GTA's traffic, people and props hit an invisible GTA car hidden under your BeamNG car. If the GTA car is smaller, things go into your BeamNG car before they react; if it's bigger, they react before they touch it. A trainer such as Menyoo makes it easy to spawn the right one (a sedan for a sedan, a jeep for a lifted truck). **Or turn on Auto-match** (F7 menu, or `AutoMatchCar=1`): F11 then swaps your GTA car for the GTA model closest in size, and a motorcycle for a BeamNG bike. The first match takes a few seconds while it measures GTA's models.
+- **Motorcycles** (2.84): export a BeamNG bike and ride a GTA motorcycle. The rider leans with BeamNG's lean, GTA still throws you off in a crash, and you can get off and back on.
 - **Run BeamNG small and light.** Window mode at 1280x720 with the lowest graphics settings. You only see GTA's picture, so BeamNG's graphics are wasted video memory.
 - **Start BeamNG first**, on Grid, Small, Pure, with only your car spawned.
 - **The first drive in an area is slower.** GTA's ground is measured and built in BeamNG as you go. It's saved in `GtaBeamD1_map\` next to GTA, so later drives there are instant.
@@ -56,7 +60,8 @@ Driving uses your own BeamNG controls and bindings (gears, clutch, drive modes).
 
 ## Known issues
 - Things react to GTA's hidden car, not the exact shape of your BeamNG car (see Tips). The parts of your BeamNG car that stick out past the GTA car crumple against walls BeamNG's way; GTA's people and signs push your car and dent it at the contact point.
-- Traffic (2.83): the box in BeamNG is a hard block, so hits are harsher than car on car, and the GTA car you hit shows no dent yet. Trucks, buses and bikes still crash the 2.82 way (a push and a small dent). The first F10 of a BeamNG session waits about 10 seconds while the boxes are made.
+- Traffic (2.83): the box in BeamNG is a hard block, so hits are harsher than car on car, and the GTA car you hit shows no dent yet. Trucks and buses still crash the 2.82 way (a push and a small dent). GTA's bikes get a bike-size box since 2.85 (`TrafficProxies=5` and the 5th `proxyPool` box). The first F10 of a BeamNG session waits about 10 seconds while the boxes are made.
+- Auto-match (2.85) deletes the GTA car it replaces (unless someone else is in it).
 - With `PuppetSolid=1` you sit in the GTA car's seat in first person, not BeamNG's.
 - Some hillsides and bridge decks can have holes or show up a few seconds late.
 - The camera can lag a little at low speed.
@@ -70,7 +75,9 @@ Everything is in `GtaBeamD1.ini`, with comments. The ones you're most likely to 
 - `PuppetSolid=1` (default): GTA's world reacts to your car with GTA's own physics. `0` goes back to the 2.76 way (traffic you touch vanishes, set by `TrafficMode`).
 - `PuppetNoMap=1` (default, 2.81): GTA's hidden car ignores GTA's map and BeamNG's solid posts; BeamNG alone hits them. `0`: the 2.77 way.
 - `CrashHurt=0` (default, 2.81): crashes don't hurt you. `1`: they do (Ctrl+F9 switches it in game).
-- `TrafficProxies=4` (default, 2.83; needs the 2.83 BeamNG mod): that many boxes wait in BeamNG. A GTA car about to meet yours gets one (sizes and weights: `proxyPool` in `GtaBeamD1_traffic.json`), BeamNG resolves the crash, GTA's car copies its box and the hidden car ignores that GTA car. `0`: the 2.82 way.
+- `AutoMatchCar=0` (2.85): `1` swaps the GTA car for one of your BeamNG car's size at F11. `AutoMatchModels` lists the GTA models it picks from.
+- `MenuKey=0x76` (2.85): the in-game menu's key (F7).
+- `TrafficProxies=5` (default since 2.85, was 4 in 2.83; needs the 2.83 BeamNG mod): that many boxes wait in BeamNG. A GTA car about to meet yours gets one (sizes and weights: `proxyPool` in `GtaBeamD1_traffic.json`), BeamNG resolves the crash, GTA's car copies its box and the hidden car ignores that GTA car. `0`: the 2.82 way.
 - `PuppetPassCar=1` (2.82): only for GTA cars with no box. It doesn't stop GTA removing a traffic car the hidden car is teleported onto.
 - `Weapons=0` turns off weapon damage on the car.
 - `DriveGravity` sets how heavy the car feels (1.1).
@@ -87,6 +94,14 @@ Please attach both logs:
 ## Roadmap
 Planned, in rough order. No dates, and things may change with your feedback.
 
+**Done in 2.85 (OpenGTANG)**
+- In-game menu (F7).
+- The hidden GTA car picked automatically to match your BeamNG car's size (a switch, off by default).
+- GTA's motorcycles and bicycles get a crash box in BeamNG; a hard hit knocks the rider off.
+
+**Done in 2.84 (OpenGTANG)**
+- Motorcycles: BeamNG bikes on GTA bikes, with the lean, the rider's pose, getting off and on, and GTA's crash ejection.
+
 **Done in 2.83**
 - Low-speed crashes: your BeamNG car crumples against walls, kerbs and posts at any speed.
 - Crash damage on/off key (Ctrl+F9), off by default.
@@ -95,7 +110,6 @@ Planned, in rough order. No dates, and things may change with your feedback.
 
 **Planned**
 - Better soft-body hits from GTA's people and props: your car crumples where it's hit.
-- The hidden GTA car picked automatically to match your BeamNG car's size.
 - Tyre smoke and screech when the wheels spin.
 - No more holes on hills and bridges.
 - Smoother camera at low speed.
@@ -103,7 +117,6 @@ Planned, in rough order. No dates, and things may change with your feedback.
 - A launcher: one click starts BeamNG (Grid, Small, Pure) and then GTA.
 - Show cars with proper lighting; door glass on every car.
 - Steering wheel and force feedback support.
-- Motorcycles.
 - A second BeamNG car on the road (AI chases, trailers).
 - GTA V Enhanced edition support.
 

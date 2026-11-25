@@ -22,6 +22,6 @@
   "twinDentScale": 1.0,
   "twinDentMaxM": 0.35,
   "twinStillS": 2.0,
-  "proxyAbout": "v2.83 (TrafficProxies in the ini: how many): boxes in BeamNG that take a GTA car's place just before it meets yours while PuppetSolid is on, so BeamNG resolves that crash and your car really crumples. Each entry: box:width:length:height:kg (m). The GTA car gets the free box closest to it in length. twinLeadS, twinStillS and TwinMaxLengthM are used for them too.",
-  "proxyPool": ["box:1.9:4.7:1.45:1500", "box:1.8:4.1:1.45:1250", "box:2.05:5.2:1.8:2200", "box:1.9:4.7:1.45:1500"]
+  "proxyAbout": "v2.83 (TrafficProxies in the ini: how many): boxes in BeamNG that take a GTA car's place just before it meets yours while PuppetSolid is on, so BeamNG resolves that crash and your car really crumples. Each entry: box:width:length:height:kg (m). The GTA car gets the free box closest to it in length. v2.85: a box shorter than 2.8 m is a bike box: only GTA motorcycles and bicycles get it (and only they: a bike gets no car box), and a hard hit on it knocks the rider off; with no bike box in the pool, bikes crash the 2.82 way. twinLeadS, twinStillS and TwinMaxLengthM are used for them too.",
+  "proxyPool": ["box:1.9:4.7:1.45:1500", "box:1.8:4.1:1.45:1250", "box:2.05:5.2:1.8:2200", "box:1.9:4.7:1.45:1500", "box:0.8:2.2:1.2:250"]
 }
