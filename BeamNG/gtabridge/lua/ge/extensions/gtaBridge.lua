@@ -77,7 +77,7 @@
 --   gtaBridge.soundSession(false) -- v2.4: switch the sound "session" mode off (the GTA plugin's BeamNGSoundWake=session sets it)
 
 local M = {}
-M.version = '2.83'
+M.version = '2.85'
 local logTag = 'gtaBridge'
 
 -- ---------------------------------------------------------------- config
@@ -1173,6 +1173,12 @@ local function onExported(root)
     wheels = #(info.wheels or {}), drivenWheels = info.driven, paint = exportJob.paint, vehicle = exportJob.vehicle,
     modVersion = M.version, dents = info.dentsNote and info.dentsNote:sub(1, 700) or nil,   -- v2.52: in GTA's log too
   }
+  -- v2.85 (OpenGTANG): the driver's eye (as drive_start sends it) with the export, so GTA can pick the GTA vehicle you'd sit right in
+  pcall(function()
+    local veh = getPlayerVehicle(0)
+    local e = veh and M.driverEye and M.driverEye(veh)
+    if e then reply.eye = { tonumber(string.format('%.3f', e[1])), tonumber(string.format('%.3f', e[2])), tonumber(string.format('%.3f', e[3])) } end
+  end)
   local line = string.format('export: %s -> %s (%.1f MB, %d meshes, %d materials, textures %d new (%d .dds as they are, %d .dds failed -> png) + %d reused, %d wheels (driven %s), %.1f s)',
     tostring(reply.vehicle), tostring(real), reply.bytes / 1048576, reply.meshes, ms.materials or 0,
     (ms.converted or 0) + (ms.copied or 0) + (ms.ddsCopied or 0), ms.ddsCopied or 0, ms.ddsFailed or 0, ms.reused or 0, reply.wheels, tostring(info.driven), reply.ms / 1000)
@@ -2163,6 +2169,7 @@ local function driverEye(veh)
   local e = { -tonumber(c.x) + acc[1] / n, -tonumber(c.y) + acc[2] / n, tonumber(c.z) + acc[3] / n }
   return e, string.format('%s at jbeam %.2f %.2f %.2f, from %d nodes', how, tonumber(c.x), tonumber(c.y), tonumber(c.z), n)
 end
+M.driverEye = driverEye  -- v2.85: the export sends it too
 
 -- v2.72: the same in the car's own Lua (v.data.camerasInternal; its nodes' jbeam positions against where they are now)
 dents.EYE = [==[   -- (a field: Lua's 200-locals limit, no globals)
