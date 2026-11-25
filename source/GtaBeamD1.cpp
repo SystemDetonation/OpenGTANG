@@ -2102,6 +2102,7 @@ namespace
 		bool     wOk[kDrvWheels] = {};
 		float    wC[kDrvWheels][3] = {}, wA[kDrvWheels][3] = {}, wAng[kDrvWheels] = {};
 		bool     wSpin = false;  // v2.85: wAng from BeamNG's spin (p.spin)
+		double   drawOff[3] = {};  // v2.85: your seat with PuppetSolid: the drawn car moved this far (its right, forward, up), GTA's car not
 		double   wAngU[kDrvWheels] = {};  // v2.73: BeamNG's turn angle as sent (counted on, not wrapped: the tyre smoke's slip)
 		bool     ang0Set[kDrvWheels] = {};
 		double   ang0[kDrvWheels] = {};
@@ -2343,9 +2344,9 @@ namespace
 		// (v2.0 drive mode: the GTA car is put where BeamNG has the car, so no ini offsets/turn then)
 		const bool   drv = g_drv.state == 2;
 		// (v2.71: in drive mode the offset the car is put with: the seat moves it)
-		const double lx = drv ? g_drv.lx : (g_tgt.dmin.x + g_tgt.dmax.x) * 0.5 + g_cfg.offX;
-		const double ly = drv ? g_drv.ly : (g_tgt.dmin.y + g_tgt.dmax.y) * 0.5 + g_cfg.offY;
-		const double lz = drv ? g_drv.lz : g_tgt.dmin.z + g_cfg.offZ;
+		const double lx = drv ? g_drv.lx + g_drv.drawOff[0] : (g_tgt.dmin.x + g_tgt.dmax.x) * 0.5 + g_cfg.offX;  // (v2.85: + your seat, PuppetSolid)
+		const double ly = drv ? g_drv.ly + g_drv.drawOff[1] : (g_tgt.dmin.y + g_tgt.dmax.y) * 0.5 + g_cfg.offY;
+		const double lz = drv ? g_drv.lz + g_drv.drawOff[2] : g_tgt.dmin.z + g_cfg.offZ;
 		c.ox = p.x + R[0] * lx + F[0] * ly + U[0] * lz;
 		c.oy = p.y + R[1] * lx + F[1] * ly + U[1] * lz;
 		c.oz = p.z + R[2] * lx + F[2] * ly + U[2] * lz;
@@ -4008,9 +4009,10 @@ namespace
 		}
 		// v2.84: a bike is drawn at BeamNG's pose (its lean exactly; GTA's physics can still pull its hidden bike upright within a step)
 		if (g_cfg.driveDrawPose == 1 || (g_drv.bike && !g_drv.foot)) {
-			c.ox = E[0];
-			c.oy = E[1];
-			c.oz = E[2];
+			const double* o = g_drv.drawOff;  // v2.85: your seat (PuppetSolid)
+			c.ox = E[0] + g_dset.R[0] * o[0] + g_dset.F[0] * o[1] + g_dset.U[0] * o[2];
+			c.oy = E[1] + g_dset.R[1] * o[0] + g_dset.F[1] * o[1] + g_dset.U[1] * o[2];
+			c.oz = E[2] + g_dset.R[2] * o[0] + g_dset.F[2] * o[1] + g_dset.U[2] * o[2];
 			for (int k = 0; k < 3; ++k) {
 				c.R[k] = float(g_dset.R[k]);
 				c.F[k] = float(g_dset.F[k]);
@@ -12205,10 +12207,15 @@ namespace
 	{
 		DriveState& d = g_drv;
 		auto        it = g_seat.cars.find(d.vehB);
-		const auto  o = it != g_seat.cars.end() && !g_cfg.puppetSolid ? it->second : std::array<double, 3>{ 0, 0, 0 };  // (v2.77: PuppetSolid: none)
-		d.lx = g_seat.base[0] - o[0];
-		d.ly = g_seat.base[1] - o[1];
-		d.lz = g_seat.base[2] - o[2];
+		const auto  o = it != g_seat.cars.end() ? it->second : std::array<double, 3>{ 0, 0, 0 };
+		// v2.85 (OpenGTANG): with PuppetSolid, GTA's solid car stays on BeamNG's car (v2.77), so your seat moves only the drawn car
+		// around you (you forward = the drawn car back); without it, GTA's car moves as before. Your test: seat adjust changed the
+		// numbers but nothing moved (v2.77 had left it off with PuppetSolid)
+		const bool solid = g_cfg.puppetSolid;
+		d.lx = g_seat.base[0] - (solid ? 0.0 : o[0]);
+		d.ly = g_seat.base[1] - (solid ? 0.0 : o[1]);
+		d.lz = g_seat.base[2] - (solid ? 0.0 : o[2]);
+		for (int k = 0; k < 3; ++k) d.drawOff[k] = solid ? -o[k] : 0.0;
 	}
 	void DrvSeatEye();
 	void DrvSeat()
@@ -12315,7 +12322,7 @@ namespace
 		if (!g_cfg.driverSeat) return;
 		if (g_cfg.puppetSolid) {  // v2.77: the seat offset would move GTA's solid body away from the drawn car
 			static int said = 0;
-			if (said++ < 2) Log("drive (v2.77): driver's seat: PuppetSolid: GTA's car stays on the drawn car's footprint (you sit in GTA's seat; seat adjust not used)");
+			if (said++ < 2) Log("drive (v2.77): driver's seat: PuppetSolid: GTA's car stays on the drawn car's footprint (you sit in GTA's seat; v2.85: seat adjust moves the drawn car)");
 			return;
 		}
 		if (!d.eyeOk || !d.headOk) {
