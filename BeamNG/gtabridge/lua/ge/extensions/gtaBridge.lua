@@ -1170,15 +1170,33 @@ local function onExported(root)
         end
         return ni
       end
+      -- (a parent that doesn't move its children: the extra reference is only dropped. BeamNG's parts sit where they are with no
+      -- node transforms, so a copy would draw the same part twice: the wl40's front tyre under the rear group)
+      local function still(nd)
+        return not (nd.translation or nd.rotation or nd.scale or nd.matrix)
+      end
+      local dropped = 0
       for pi = 1, nOrig do
         local ch = nodes[pi].children
         if type(ch) == 'table' then
-          for k, c in ipairs(ch) do
-            if seen[c] then ch[k] = cloneTree(c); fixed = fixed + 1 else seen[c] = true end
+          local keep = {}
+          for _, c in ipairs(ch) do
+            if not seen[c] then
+              seen[c] = pi
+              keep[#keep + 1] = c
+            elseif still(nodes[pi]) and still(nodes[seen[c]]) then
+              dropped = dropped + 1
+            else
+              keep[#keep + 1] = cloneTree(c)
+              fixed = fixed + 1
+            end
           end
+          nodes[pi].children = (#keep > 0) and keep or nil
         end
       end
-      if fixed > 0 then logI(string.format('export: %d node(s) were under two parents: each extra parent got its own copy (%d nodes now)', fixed, #nodes)) end
+      if fixed + dropped > 0 then
+        logI(string.format('export: %d node reference(s) under a second parent: %d dropped (same place), %d copied (%d nodes now)', fixed + dropped, dropped, fixed, #nodes))
+      end
     end)
     local s = jsonEncode(root)
     local wr = writeFile(exportCfg.vpath, s)

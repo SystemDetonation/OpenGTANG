@@ -1437,6 +1437,11 @@ namespace car
 				}
 			}
 			if (!wins.empty()) wheelOff = bestOff;
+			// v2.85 (OpenGTANG): how far from the hub's middle a wheel's part may reach along the axle: half the exported tyre
+			// width + 15 cm, at least 45 cm (the old fixed value). The wl40 wheel loader's 0.8 m tyres and rims reach 0.46 m:
+			// only 90-95% of them were inside 0.45 m, so none became a wheel (drawn as body: no spin, left behind when the
+			// front frame turned)
+			std::vector<double> alongMax;
 			for (const WIn& x : wins) {
 				const V3 o = offsets[bestOff];
 				const V3 a = Sub(toCar({ x.a.x + o.x, x.a.y + o.y, x.a.z + o.z }), shift);
@@ -1452,6 +1457,7 @@ namespace car
 				w.front = c.y > 0;
 				w.driven = x.driven;
 				out.wheels.push_back(w);
+				alongMax.push_back(std::max(0.45, x.width * 0.5 + 0.15));
 			}
 			// assign each mesh node to a wheel by where its vertices are
 			std::map<int, std::vector<size_t>> primsOfNode;
@@ -1476,7 +1482,7 @@ namespace car
 							const V3     d{ P.x - w.c[0], P.y - w.c[1], P.z - w.c[2] };
 							const double along = d.x * w.axis[0] + d.y * w.axis[1] + d.z * w.axis[2];
 							const V3     rad{ d.x - along * w.axis[0], d.y - along * w.axis[1], d.z - along * w.axis[2] };
-							if (sqrt(Dot(rad, rad)) <= w.radius * 1.12 && fabs(along) <= 0.45) ++inW[wi];
+							if (sqrt(Dot(rad, rad)) <= w.radius * 1.12 && fabs(along) <= alongMax[wi]) ++inW[wi];
 						}
 					}
 				}
