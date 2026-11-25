@@ -1179,6 +1179,20 @@ local function onExported(root)
     local e = veh and M.driverEye and M.driverEye(veh)
     if e then reply.eye = { tonumber(string.format('%.3f', e[1])), tonumber(string.format('%.3f', e[2])), tonumber(string.format('%.3f', e[3])) } end
   end)
+  -- v2.85: what kind of vehicle it is (its info.json "Type" and "Body Style": the configuration's, else the model's), so GTA
+  -- picks a GTA vehicle of the same kind (a chopper for a chopper, a bus for a bus)
+  pcall(function()
+    local d = core_vehicles.getCurrentVehicleDetails()
+    local mk = (d and d.current and d.current.key) or exportJob.vehicle
+    local m = mk and core_vehicles.getModel(mk)
+    local ck = d and d.current and d.current.config_key
+    local c = m and m.configs and ck and m.configs[ck]
+    local body = (c and c['Body Style']) or (m and m.model and m.model['Body Style'])
+    local typ = (c and c.Type) or (m and m.model and m.model.Type)
+    if type(body) == 'string' then reply.vbody = body:gsub('^%s+', ''):gsub('%s+$', '') end
+    if type(typ) == 'string' then reply.vtype = typ end
+  end)
+  logI(string.format('export: kind: type %s, body style %s, driver\'s eye %s', tostring(reply.vtype), tostring(reply.vbody), reply.eye and 'sent' or 'none'))
   local line = string.format('export: %s -> %s (%.1f MB, %d meshes, %d materials, textures %d new (%d .dds as they are, %d .dds failed -> png) + %d reused, %d wheels (driven %s), %.1f s)',
     tostring(reply.vehicle), tostring(real), reply.bytes / 1048576, reply.meshes, ms.materials or 0,
     (ms.converted or 0) + (ms.copied or 0) + (ms.ddsCopied or 0), ms.ddsCopied or 0, ms.ddsFailed or 0, ms.reused or 0, reply.wheels, tostring(info.driven), reply.ms / 1000)

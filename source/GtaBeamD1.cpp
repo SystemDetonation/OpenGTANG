@@ -1397,6 +1397,7 @@ namespace
 	double                      g_expEye[3] = {};
 	bool                        g_expEyeOk = false;
 	std::string                 g_expEyeVeh;
+	std::string                 g_expBody, g_expType;  // v2.85: its info.json "Body Style" and "Type" (for g_expEyeVeh)
 	int JsonNums(const char* js, const char* key, double* out, int maxN);  // (below)
 	std::atomic<float>          g_doorAng[2] = {};     // v2.73: how far the drawn front doors are open (rad; left, right)
 	std::atomic<int>            g_doorParts[2] = {};   // v2.73: the drawn car's front door parts (left, right)
@@ -3057,11 +3058,16 @@ namespace
 			double      e[3];
 			std::string vn;
 			JsonStr(reply, "vehicle", vn);
-			const bool ok = JsonNums(reply.c_str(), "eye", e, 3) == 3;
+			const bool  ok = JsonNums(reply.c_str(), "eye", e, 3) == 3;
+			std::string body, typ;
+			JsonStr(reply, "vbody", body);  // v2.85: its kind (info.json "Body Style", "Type")
+			JsonStr(reply, "vtype", typ);
 			std::lock_guard<std::mutex> lk(g_modelMx);
 			g_expEyeOk = ok;
 			if (ok) memcpy(g_expEye, e, sizeof(g_expEye));
 			g_expEyeVeh = vn;
+			g_expBody = body;
+			g_expType = typ;
 		}
 		LoadCar(path);
 	}
@@ -14486,7 +14492,9 @@ namespace
 		"ambulance,towtruck,scrap,barracks,bus,coach,airbus,rentalbus,tourbus,pbus,"
 		// motorcycles
 		"bati,akuma,pcj,sanchez,sanchez2,hexer,double,ruffian,vader,faggio2,daemon,bagger,nemesis,carbonrs,hakuchou,enduro,innovation,thrust,"
-		"lectro,vindicator,sovereign,bf400,gargoyle,cliffhanger";
+		"lectro,vindicator,sovereign,bf400,gargoyle,cliffhanger,"
+		// more bikes, so each kind has a few (choppers, cruisers, sport, dirt, scooters)
+		"zombiea,zombieb,wolfsbane,nightblade,avarus,sanctus,hakuchou2,bati2,defiler,vortex,diablous,fcr,manchez,esskey,faggio,faggio3";
 
 	struct AmSize
 	{
@@ -14629,6 +14637,82 @@ namespace
 		if (headOk && z.head) s = 2.0 * AmSeatErr(z, bh) + 0.5 * s;
 		if (AmNameHit(beam, n)) s -= 3.0;
 		return s;
+	}
+
+	// ---- v2.85: kinds. A GTA vehicle's kind: GTA puts every motorcycle in one class, so bikes are named here (choppers, cruisers,
+	// sport, dirt, scooters); others by GTA's class, with a few named (pickups, buses, trucks). Your 2.85 test: the Angel (a
+	// chopper) got a BF400 (a dirt bike), and you sat on it like a motocross rider
+	std::string AmGtaCat(const std::string& n, int cls)
+	{
+		static const std::map<std::string, const char*> kNamed = {
+			{ "daemon", "chopper" }, { "hexer", "chopper" }, { "innovation", "chopper" }, { "zombieb", "chopper" }, { "avarus", "chopper" }, { "sanctus", "chopper" },
+			{ "gargoyle", "chopper" },
+			{ "bagger", "cruiser" }, { "sovereign", "cruiser" }, { "nightblade", "cruiser" }, { "wolfsbane", "cruiser" }, { "zombiea", "cruiser" },
+			{ "bati", "sport" }, { "bati2", "sport" }, { "akuma", "sport" }, { "carbonrs", "sport" }, { "hakuchou", "sport" }, { "hakuchou2", "sport" }, { "double", "sport" },
+			{ "ruffian", "sport" }, { "vader", "sport" }, { "nemesis", "sport" }, { "pcj", "sport" }, { "lectro", "sport" }, { "vindicator", "sport" }, { "thrust", "sport" },
+			{ "defiler", "sport" }, { "vortex", "sport" }, { "diablous", "sport" }, { "fcr", "sport" },
+			{ "sanchez", "dirt" }, { "sanchez2", "dirt" }, { "enduro", "dirt" }, { "bf400", "dirt" }, { "manchez", "dirt" }, { "cliffhanger", "dirt" }, { "esskey", "dirt" },
+			{ "faggio", "scooter" }, { "faggio2", "scooter" }, { "faggio3", "scooter" },
+			{ "sadler", "pickup" }, { "bobcatxl", "pickup" }, { "bison", "pickup" }, { "rebel2", "pickup" }, { "sandking", "pickup" }, { "sandking2", "pickup" },
+			{ "bus", "bus" }, { "coach", "bus" }, { "airbus", "bus" }, { "rentalbus", "bus" }, { "tourbus", "bus" }, { "pbus", "bus" },
+			{ "ambulance", "van" }, { "firetruk", "truck" },
+		};
+		auto it = kNamed.find(n);
+		if (it != kNamed.end()) return it->second;
+		switch (cls) {
+		case 0: return "compact";
+		case 1: return "sedan";
+		case 2: return "suv";
+		case 3: return "coupe";
+		case 4: return "muscle";
+		case 5: case 6: case 7: return "sports";
+		case 8: return "bike";  // (a bike not named above: any bike kind takes it last)
+		case 9: return "offroad";
+		case 12: return "van";
+		case 17: return "bus";
+		case 10: case 11: case 19: case 20: return "truck";
+		default: return "other";
+		}
+	}
+	// BeamNG's kind (its info.json "Body Style", else "Type") -> the GTA kinds that fit: tiers, the first with any GTA vehicle in
+	// it is used (a chopper: choppers, then cruisers). Empty: kind unknown (any car / any bike, by seat and size)
+	std::vector<std::vector<std::string>> AmWant(std::string body, const std::string& type, bool bike)
+	{
+		for (char& c : body) c = char(tolower((unsigned char)c));
+		auto has = [&](const char* w) { return body.find(w) != std::string::npos; };
+		if (bike) {
+			if (has("chopper")) return { { "chopper" }, { "cruiser" }, { "bike" } };
+			if (has("cruiser") || has("bobber") || has("touring") || has("custom")) return { { "cruiser" }, { "chopper" }, { "bike" } };
+			if (has("dirt") || has("motocross") || has("enduro") || has("supermoto") || has("trail")) return { { "dirt" }, { "bike" } };
+			if (has("scooter") || has("moped")) return { { "scooter" }, { "bike" } };
+			if (has("sport") || has("naked") || has("street") || has("standard")) return { { "sport" }, { "bike" } };
+			return {};
+		}
+		if (has("bus")) return { { "bus" }, { "truck" } };
+		if (has("ambulance")) return { { "van" }, { "truck" } };
+		if (has("truck") || has("fifth wheel") || has("flatbed") || has("tanker") || has("dump") || has("mixer") || has("logging") || has("chassis cab") ||
+		    has("armored") || has("semi") || has("jato"))
+			return { { "truck" }, { "bus", "van" } };
+		if (has("pickup") || has("ute")) return { { "pickup" }, { "offroad", "suv" } };
+		if (has("van")) return { { "van" }, { "suv" } };
+		if (has("suv") || has("crossover")) return { { "suv" }, { "offroad", "pickup" } };
+		if (has("buggy") || has("atv") || has("utv") || has("off-road") || has("offroad") || has("rally")) return { { "offroad" }, { "pickup", "suv" } };
+		if (has("hatchback")) return { { "compact", "sedan" }, { "coupe" } };
+		if (has("muscle")) return { { "muscle" }, { "coupe", "sports" } };
+		if (has("super") || has("sports") || has("race")) return { { "sports" }, { "coupe" } };
+		if (has("coupe") || has("roadster") || has("convertible") || has("cabrio")) return { { "coupe", "sports" }, { "muscle", "sedan" } };
+		if (has("sedan") || has("wagon") || has("estate") || has("shooting brake") || has("limousine") || has("liftback")) return { { "sedan" }, { "coupe", "compact" } };
+		if (!body.empty()) return {};
+		if (!_stricmp(type.c_str(), "Truck")) return { { "truck", "pickup", "suv", "van" }, { "bus" } };
+		return {};
+	}
+	bool AmInTier(const std::string& cat, const std::vector<std::string>& tier) { return std::find(tier.begin(), tier.end(), cat) != tier.end(); }
+	void AmBeamKind(std::string& body, std::string& type)
+	{
+		std::lock_guard<std::mutex> lk(g_modelMx);
+		if (g_expEyeVeh != g_drvModel.vehicle) return;  // (from another car's export)
+		body = g_expBody;
+		type = g_expType;
 	}
 
 	void AmHeadsCleanup()
@@ -14805,7 +14889,7 @@ namespace
 		for (const std::string& n : g_am.shortlist) {
 			const AmSize& z = g_am.size[n];
 			const double  s = AmTotal(n, z, beam, headOk, bh);
-			Log("auto-match (v2.85):   %-12s %.2f x %.2f x %.2f m, size %.2f, %s%s -> %.2f", n.c_str(), z.w, z.l, z.h, AutoMatchScore(z.w, z.l, z.h),
+			Log("auto-match (v2.85):   %-12s %-8s %.2f x %.2f x %.2f m, size %.2f, %s%s -> %.2f", n.c_str(), AmGtaCat(n, z.cls).c_str(), z.w, z.l, z.h, AutoMatchScore(z.w, z.l, z.h),
 				headOk && z.head ? ("seat " + std::to_string(int(AmSeatErr(z, bh) * 100 + 0.5)) + " cm off").c_str() : "seat not compared",
 				AmNameHit(beam, n) ? ", named in BeamNG's vehicle" : "", s);
 			if (s < bestS) bestS = s, best = n;
@@ -14827,21 +14911,43 @@ namespace
 	{
 		const bool        bike = AutoMatchBike();
 		const std::string beam = AmBeamVeh();
-		// the one picked for this BeamNG vehicle before (unless asked to pick again)
+		// v2.85: BeamNG's kind (a chopper, a sport bike, a sedan, a bus...) and the GTA kinds that fit it
+		std::string body, type;
+		AmBeamKind(body, type);
+		const auto  want = AmWant(body, type, bike);
+		auto        fits = [&](const std::string& n, int cls, size_t tier) { return want.empty() || AmInTier(AmGtaCat(n, cls), want[tier]); };
+		// the one picked for this BeamNG vehicle before (unless asked to pick again; or it's not of BeamNG's kind: picked before kinds)
 		auto mem = g_am.memory.find(beam);
 		if (!g_am.fresh && mem != g_am.memory.end()) {
 			auto it = g_am.size.find(mem->second);
-			if (it != g_am.size.end() && AutoMatchKind(it->second.cls, bike)) {
+			if (it != g_am.size.end() && AutoMatchKind(it->second.cls, bike) && (want.empty() || fits(mem->second, it->second.cls, 0))) {
 				AutoMatchUse(mem->second, "picked for this BeamNG vehicle before: GtaBeamD1_carmatch.txt");
 				return;
 			}
+			if (it != g_am.size.end())
+				Log("auto-match (v2.85): %s was picked for %s before, but it's a %s, not what BeamNG calls it (%s): picked again", mem->second.c_str(), beam.c_str(),
+					AmGtaCat(mem->second, it->second.cls).c_str(), body.c_str());
 		}
-		// the closest in size (and any named in BeamNG's vehicle name), then where you'd sit in each
+		// of BeamNG's kind (the first tier with any), the closest in size (and any named in BeamNG's vehicle name), then where you'd sit
 		std::vector<std::pair<double, std::string>> c;
-		for (const std::string& n : AutoMatchList()) {
-			auto it = g_am.size.find(n);
-			if (it == g_am.size.end() || !AutoMatchKind(it->second.cls, bike)) continue;
-			c.push_back({ AutoMatchScore(it->second.w, it->second.l, it->second.h) - (AmNameHit(beam, n) ? 3.0 : 0.0), n });
+		size_t                                      tierUsed = 0;
+		for (size_t tier = 0; tier <= want.size() && c.empty(); ++tier) {
+			tierUsed = tier;
+			for (const std::string& n : AutoMatchList()) {
+				auto it = g_am.size.find(n);
+				if (it == g_am.size.end() || !AutoMatchKind(it->second.cls, bike)) continue;
+				if (tier < want.size() && !fits(n, it->second.cls, tier)) continue;  // (tier == want.size(): none of its kind listed: any)
+				c.push_back({ AutoMatchScore(it->second.w, it->second.l, it->second.h) - (AmNameHit(beam, n) ? 3.0 : 0.0), n });
+			}
+			if (want.empty()) break;
+		}
+		{
+			std::string kinds;
+			if (tierUsed < want.size())
+				for (const std::string& k : want[tierUsed]) kinds += (kinds.empty() ? "" : "/") + k;
+			Log("auto-match (v2.85): BeamNG's %s is a '%s' (%s): %s", beam.c_str(), body.empty() ? "?" : body.c_str(), type.empty() ? "?" : type.c_str(),
+				want.empty() ? "kind not known: any GTA car / bike" : tierUsed < want.size() ? ("GTA " + kinds + (tierUsed ? " (none of the closer kind listed)" : "")).c_str()
+				                                                                               : "none of its kind in the list: any");
 		}
 		std::sort(c.begin(), c.end());
 		if (c.empty()) {
