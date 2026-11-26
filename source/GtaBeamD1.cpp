@@ -14522,6 +14522,7 @@ namespace
 		bool                                         cacheRead = false, memRead = false;
 		std::map<std::string, AmSize>                size;
 		std::map<std::string, std::string>           memory;  // BeamNG vehicle -> the GTA model picked for it (GtaBeamD1_carmatch.txt)
+		std::map<std::string, uint32_t>              memList;  // v2.85: ... and the stamp of the list and rules it was picked from (AmListStamp)
 		bool                                         fresh = false;  // a new match: the remembered pick not used
 		std::vector<std::string>                     shortlist, heads;  // state 3: the closest in size; those still to seat
 		int                                          clone = 0, hv = 0, hstep = 0;
@@ -14595,17 +14596,35 @@ namespace
 			g_am.memRead = true;
 			FILE* f = fopen(path, "r");
 			if (!f) return;
-			char line[200], a[96], b[64];
-			while (fgets(line, sizeof(line), f))
-				if (line[0] != '#' && sscanf(line, "%95s %63s", a, b) == 2) g_am.memory[a] = b;
+			char     line[200], a[96], b[64];
+			unsigned h = 0;
+			while (fgets(line, sizeof(line), f)) {
+				const int n = line[0] == '#' ? 0 : sscanf(line, "%95s %63s %x", a, b, &h);
+				if (n < 2) continue;
+				g_am.memory[a] = b;
+				g_am.memList[a] = n == 3 ? uint32_t(h) : 0u;  // (a line from before list stamps: 0, picked again)
+			}
 			fclose(f);
 			return;
 		}
 		FILE* f = fopen(path, "w");
 		if (!f) return;
-		fprintf(f, "# GTA x Beam (OpenGTANG) v2.85: the GTA vehicle picked for each BeamNG vehicle (beamng gta). Delete a line (or the menu's Match hidden car now) to pick again.\n");
-		for (const auto& kv : g_am.memory) fprintf(f, "%s %s\n", kv.first.c_str(), kv.second.c_str());
+		fprintf(f, "# GTA x Beam (OpenGTANG) v2.85: the GTA vehicle picked for each BeamNG vehicle (beamng gta list-stamp). Delete a line (or the menu's Match hidden car "
+		           "now) to pick again; a pick made from another GTA model list or matching rules is made again by itself.\n");
+		for (const auto& kv : g_am.memory) fprintf(f, "%s %s %08x\n", kv.first.c_str(), kv.second.c_str(), g_am.memList[kv.first]);
 		fclose(f);
+	}
+
+	// v2.85: the stamp a remembered pick carries: the GTA model list (AutoMatchModels or the built-in one) and the matching rules'
+	// version. When either changes (the trucks and buses added after your semi and bus were matched to the Benson), the pick is
+	// made again by itself the next time
+	constexpr const char* kAmRules = "2.85-kinds-seat3x";
+	uint32_t AmListStamp()
+	{
+		std::string s = kAmRules;
+		for (const std::string& n : AutoMatchList()) s += "," + n;
+		const uint32_t h = Joaat(s.c_str());
+		return h ? h : 1u;
 	}
 
 	// BeamNG's car: its name, and where its driver's head goes in the car file's frame (the driver's eye from the export, less the
@@ -14931,6 +14950,7 @@ namespace
 			return;
 		}
 		g_am.memory[beam] = best;
+		g_am.memList[beam] = AmListStamp();
 		AutoMatchMemory(true);
 		if (headOk && g_am.size[best].head)
 			Notify("Match: %s, your seat %.0f cm from BeamNG's driver.", best.c_str(), AmSeatErr(g_am.size[best], bh) * 100);
@@ -14948,6 +14968,10 @@ namespace
 		auto        fits = [&](const std::string& n, int cls, size_t tier) { return want.empty() || AmInTier(AmGtaCat(n, cls), want[tier]); };
 		// the one picked for this BeamNG vehicle before (unless asked to pick again; or it's not of BeamNG's kind: picked before kinds)
 		auto mem = g_am.memory.find(beam);
+		if (!g_am.fresh && mem != g_am.memory.end() && g_am.memList[beam] != AmListStamp()) {
+			Log("auto-match (v2.85): %s was picked for %s from another GTA model list or matching rules: picked again", mem->second.c_str(), beam.c_str());
+			mem = g_am.memory.end();
+		}
 		if (!g_am.fresh && mem != g_am.memory.end()) {
 			auto it = g_am.size.find(mem->second);
 			if (it != g_am.size.end() && AutoMatchKind(it->second.cls, bike) && (want.empty() || fits(mem->second, it->second.cls, 0))) {
