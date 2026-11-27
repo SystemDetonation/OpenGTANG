@@ -87,6 +87,7 @@ Everything is in `GtaBeamD1.ini`, with comments. The ones you're most likely to 
 - `CrashHurt=0` (default, 2.81): crashes don't hurt you. `1`: they do (Ctrl+F9 switches it in game).
 - `AutoMatchCar=0` (2.85): `1` makes F11 swap the GTA car for the matching one (kind, seat, size; see Tips). `AutoMatchModels` lists the GTA models it picks from (empty: 164 built in, cars to buses and heavy machinery). The F7 menu's Get car always matches.
 - `MenuKey=0x76` (2.85): the in-game menu's key (F7).
+- `SeatMoves=gta` (2.85, with `PuppetSolid=1`): seat adjust moves the hidden GTA car and you, so the BeamNG car stays on its wheels. `beamng`: it moves the drawn car instead, and collisions stay exactly on it. Also a switch in the F7 menu.
 - `TrafficProxies=5` (default since 2.85, was 4 in 2.83; needs the 2.83 BeamNG mod): that many boxes wait in BeamNG. A GTA car about to meet yours gets one (sizes and weights: `proxyPool` in `GtaBeamD1_traffic.json`), BeamNG resolves the crash, GTA's car copies its box and the hidden car ignores that GTA car. `0`: the 2.82 way.
 - `PuppetPassCar=1` (2.82): only for GTA cars with no box. It doesn't stop GTA removing a traffic car the hidden car is teleported onto.
 - `Weapons=0` turns off weapon damage on the car.

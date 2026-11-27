@@ -632,6 +632,7 @@ namespace
 		bool        autoMatch = false;        // AutoMatchCar: F11 swaps the GTA car for the GTA model closest to BeamNG's car in size (a bike for a bike)
 		std::string autoMatchModels;          // AutoMatchModels: the GTA models it picks from (comma list; empty = the built-in list)
 		int         menuKey = VK_F7;          // MenuKey: the in-game menu
+		bool        seatMovesDrawn = false;   // SeatMoves: what seat adjust moves with PuppetSolid: gta (GTA's car and you; the drawn car stays on its wheels) or beamng (the drawn car; collisions stay on it)
 	} g_cfg;
 
 	const char* kSec = "D1";
@@ -1071,6 +1072,11 @@ namespace
 				GetPrivateProfileStringA(kSec, "MenuKey", "", mk, sizeof(mk), path);
 				const long k = mk[0] ? strtol(mk, nullptr, 0) : 0;
 				c.menuKey = k > 0 && k < 256 ? int(k) : VK_F7;
+			}
+			{
+				char sm[16];
+				GetPrivateProfileStringA(kSec, "SeatMoves", "gta", sm, sizeof(sm), path);
+				c.seatMovesDrawn = !_stricmp(sm, "beamng") || !strcmp(sm, "1");
 			}
 			Log("settings: v2.85: AutoMatchCar %d (models: %s; picked by where you'd sit, remembered per BeamNG vehicle), menu key 0x%02X", int(c.autoMatch),
 				c.autoMatchModels.empty() ? "built-in list" : c.autoMatchModels.c_str(), c.menuKey);
@@ -12212,10 +12218,13 @@ namespace
 		// off there: the numbers changed and nothing moved). The drawn car stays where BeamNG has it, wheels on the ground (the first
 		// 2.85 try moved the drawn car instead: raising your seat sank the Piccolina into the road). GTA's traffic and props then meet
 		// the hidden car that far from the drawn one; with PuppetNoMap the map (ground, walls) is BeamNG's alone anyway
-		d.lx = g_seat.base[0] - o[0];
-		d.ly = g_seat.base[1] - o[1];
-		d.lz = g_seat.base[2] - o[2];
-		for (int k = 0; k < 3; ++k) d.drawOff[k] = 0.0;
+		// SeatMoves=beamng (the menu's "Seat moves BeamNG car"): with PuppetSolid the drawn car moves around you instead and GTA's car
+		// stays exactly on BeamNG's (collisions where you see the car; a raised seat sinks the drawn car)
+		const bool drawn = g_cfg.puppetSolid && g_cfg.seatMovesDrawn;
+		d.lx = g_seat.base[0] - (drawn ? 0.0 : o[0]);
+		d.ly = g_seat.base[1] - (drawn ? 0.0 : o[1]);
+		d.lz = g_seat.base[2] - (drawn ? 0.0 : o[2]);
+		for (int k = 0; k < 3; ++k) d.drawOff[k] = drawn ? -o[k] : 0.0;
 	}
 	void DrvSeatEye();
 	void DrvSeat()
@@ -15346,6 +15355,13 @@ namespace
 
 	void MenuExport() { StartWorker(Job::Export); }
 	void MenuClose() { g_menuOpen = false; }
+	bool MenuSeatMovesGet() { return g_cfg.seatMovesDrawn; }
+	void MenuSeatMovesSet(bool on)
+	{
+		g_cfg.seatMovesDrawn = on;
+		if (g_drv.state == 2 && g_drv.seatDone) SeatApply();  // (used at once while driving)
+		Log("seat (v2.85): seat adjust moves %s", on ? "the drawn BeamNG car (PuppetSolid: GTA's car stays on BeamNG's)" : "GTA's car and you (the drawn car stays on its wheels)");
+	}
 	bool MenuHurtGet() { return CrashHurtOn(); }
 	void MenuHurtSet(bool on)
 	{
@@ -15394,6 +15410,13 @@ namespace
 		m.push_back(B("Pause sync", "PauseSync", &c.pauseSync, false, "Pausing one game pauses the other."));
 		m.push_back(B("Tyre smoke", "TireSmoke", &c.tireSmoke, false, "GTA's smoke at wheels that spin or slide."));
 		m.push_back(A("Seat adjust", MenuSeat, "Ctrl+Shift+F10 in drive mode: arrows and Page Up / Down, again to save."));
+		{
+			MenuItem s = B("Seat moves BeamNG car", "SeatMoves", &c.seatMovesDrawn, false,
+				"ON: seat adjust moves the BeamNG car (collisions stay on it). OFF: moves the GTA car and you (wheels stay on the ground).");
+			s.set = MenuSeatMovesSet;
+			s.get = MenuSeatMovesGet;
+			m.push_back(s);
+		}
 		m.push_back(H("Bikes"));
 		m.push_back(F("Lean steer", "BikeLeanSteer", &c.bikeLeanSteer, -1.0f, 1.0f, 0.1f, false, "How GTA leans its bike and rider to BeamNG's lean. 0 off, -1 the other way."));
 		m.push_back(F("Full lean (deg)", "BikeLeanFullDeg", &c.bikeLeanFullDeg, 5.0f, 80.0f, 5.0f, false, "The BeamNG lean that gives the full lean steer."));
@@ -15410,6 +15433,7 @@ namespace
 		char path[MAX_PATH + 8], v[32];
 		PathNextToModule(".ini", path, sizeof(path));
 		if (!strcmp(it.ini, "DriveGaugeUnits")) snprintf(v, sizeof(v), "%s", g_cfg.gaugeKmh ? "kmh" : "mph");
+		else if (!strcmp(it.ini, "SeatMoves")) snprintf(v, sizeof(v), "%s", g_cfg.seatMovesDrawn ? "beamng" : "gta");
 		else if (it.kind == 2) snprintf(v, sizeof(v), "%d", it.get ? int(it.get()) : int(*it.b));
 		else if (it.i) snprintf(v, sizeof(v), "%d", *it.i);
 		else {
