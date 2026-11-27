@@ -36,6 +36,7 @@ GTA V runs the world, the walking and the guns. BeamNG.drive runs the car. Both 
 | **Ctrl+F9** | Crash damage to you on/off (off by default, 2.81) |
 | **Ctrl+F10** | Timing recording (only for bug reports) |
 | **Ctrl+F11** | Re-read the ini and json files without restarting |
+| **Ctrl+Shift+F7** | Restart the mod without restarting GTA (2.85, same as the F7 menu's **Restart the OpenGTANG mod?**) |
 | **Ctrl+Shift+F11** | Show cars: park the BeamNG car on a GTA car and keep it there (up to 4) |
 | **Ctrl+Shift+F12** | View modes (for testing) |
 | **D-pad down** | Swap the controller between GTA (aim, shoot) and BeamNG (drive) while driving |
@@ -137,7 +138,12 @@ Planned, in rough order. No dates, and things may change with your feedback.
 - GTA V Enhanced edition support.
 
 ## Building from source
-The source is in `source\`.
+The source is in `source\`. Since 2.85 the mod is two files in the GTA folder:
+- `GtaBeamD1.asi` (`loader.cpp`): a small loader. Script Hook V loads it once and can't unload it.
+- `GtaBeamD1_core.dll` (`GtaBeamD1.cpp` + `carmodel.cpp`): the mod itself. The loader runs a copy of it from `%TEMP%\OpenGTANG`, so the file in the GTA folder isn't locked. Copy a new build over it, then pick **Restart the OpenGTANG mod?** at the bottom of the F7 menu (or press Ctrl+Shift+F7): drive mode stops, the car comes off, and the new build loads without restarting GTA. `GtaBeamD1_loader.log` says what the loader did.
+- The F7 menu's **Restart Grand Theft Auto V?** closes GTA and starts it again through Steam (`RestartGtaCommand` in the ini to change that).
+- Build `-DGTANG_STANDALONE` for the old single `GtaBeamD1.asi` (no loader, no mod restart); the sandbox tests use that.
+
 - Windows with Visual Studio 2022: run `source\build_vs2022.bat` (needs the Script Hook V SDK's `ScriptHookV.lib`).
 - Linux/CI: `zig c++ -target x86_64-windows-gnu` (see `source\test\build_all.sh`). That folder also has the tests, with a fake Script Hook V and a fake BeamNG for runs under Wine. They test the code, not GTA's physics.
 

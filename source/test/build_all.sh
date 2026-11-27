@@ -16,7 +16,9 @@ python3 -c "import re,sys,collections as C; s=open(sys.argv[1]).read(); a=C.Coun
 cp native_hashes.txt run/ 2>/dev/null || true
 cd $W/src
 $Z -c -o carmodel.o carmodel.cpp 2>&1 | grep -E "error|warning" || true
-$Z -c -o GtaBeamD1.o GtaBeamD1.cpp 2>&1 | grep -E "error|warning" || true
+# v2.85: one .asi of its own (the tests load it without the OpenGTANG loader). The game build is two files: GtaBeamD1.asi
+# from loader.cpp and GtaBeamD1_core.dll from GtaBeamD1.cpp + carmodel.cpp (source\build_vs2022.bat, README "Building").
+$Z -DGTANG_STANDALONE -c -o GtaBeamD1.o GtaBeamD1.cpp 2>&1 | grep -E "error|warning" || true
 $Z -shared -o GtaBeamD1.asi GtaBeamD1.o carmodel.o ScriptHookV.lib -luser32 -lws2_32 2>&1 | grep -E "error|warning" || true
 cd $W/test
 mkdir -p run

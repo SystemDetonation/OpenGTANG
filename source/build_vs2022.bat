@@ -1,6 +1,9 @@
 @echo off
-rem Rebuilds GtaBeamD1.asi with Visual Studio 2022. Only needed if you want to build it yourself;
-rem the kit already has a ready GtaBeamD1.asi.
+rem Rebuilds the mod with Visual Studio 2022. Only needed if you want to build it yourself.
+rem OpenGTANG 2.85 builds two files for the GTA folder:
+rem   GtaBeamD1.asi       the small loader Script Hook V loads (loader.cpp)
+rem   GtaBeamD1_core.dll  the mod itself (GtaBeamD1.cpp + carmodel.cpp), loaded by the loader. The F7 menu's
+rem                       "Restart the OpenGTANG mod?" (or Ctrl+Shift+F7) loads a new one without restarting GTA.
 rem Needs ScriptHookV.lib from the official Script Hook V SDK (dev-c.com, "Script Hook V SDK"):
 rem put it at sdk\lib\ScriptHookV.lib next to this file.
 setlocal
@@ -17,9 +20,14 @@ if not defined VSPATH (
 )
 call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" >nul
 if not exist build mkdir build
-cl /nologo /std:c++17 /O2 /EHsc /MT /W3 /LD /D_CRT_SECURE_NO_WARNINGS GtaBeamD1.cpp carmodel.cpp /Fo:build\ /Fe:build\GtaBeamD1.asi /link /LIBPATH:sdk\lib user32.lib ws2_32.lib
+cl /nologo /std:c++17 /O2 /EHsc /MT /W3 /LD /D_CRT_SECURE_NO_WARNINGS GtaBeamD1.cpp carmodel.cpp /Fo:build\ /Fe:build\GtaBeamD1_core.dll /link /LIBPATH:sdk\lib user32.lib ws2_32.lib
 if errorlevel 1 (
   echo BUILD FAILED
   exit /b 1
 )
-echo Built build\GtaBeamD1.asi
+cl /nologo /std:c++17 /O2 /EHsc /MT /W3 /LD /D_CRT_SECURE_NO_WARNINGS loader.cpp /Fo:build\ /Fe:build\GtaBeamD1.asi /link /LIBPATH:sdk\lib user32.lib
+if errorlevel 1 (
+  echo BUILD FAILED
+  exit /b 1
+)
+echo Built build\GtaBeamD1.asi and build\GtaBeamD1_core.dll (copy both into the GTA folder)

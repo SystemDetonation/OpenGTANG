@@ -366,7 +366,13 @@ namespace
 	// Log file (GtaBeamD1.log next to the .asi)
 	// ---------------------------------------------------------------------------------------
 
-	HMODULE          g_module = nullptr;
+	HMODULE          g_module = nullptr;  // (v2.85: the loader's GtaBeamD1.asi when loaded by it: the ini, log and files are next to that)
+	// v2.85 (OpenGTANG): GtaBeamD1.asi is a small loader that loads this mod (GtaBeamD1_core.dll) from a copy and can unload it
+	// and load it again (the menu's Restart the mod), so a new build is used without restarting GTA
+	HMODULE           g_loader = nullptr;          // that loader (nullptr: this was loaded as an .asi of its own)
+	int               g_loadNo = 1;                // which load of the mod this is in this GTA session
+	std::atomic<bool> g_stopping{ false };         // being unloaded: Present and the hooks have nothing more to do
+	std::atomic<bool> g_restartKey{ false };       // the loader's Ctrl+Shift+F7: restart the mod
 	CRITICAL_SECTION g_logCs;
 	HANDLE           g_logFile = INVALID_HANDLE_VALUE;
 	ULONGLONG        g_startMs = 0;
@@ -382,13 +388,24 @@ namespace
 		snprintf(out, outSize, "%s%s", path, ext);
 	}
 
-	void InitLog()
+	// v2.85 (OpenGTANG): the mod restarted from the menu (the loader's load number > 1) writes on at the end of the same log
+	void InitLog(bool append = false)
 	{
 		InitializeCriticalSection(&g_logCs);
 		g_startMs = GetTickCount64();
 		char path[MAX_PATH + 8];
 		PathNextToModule(".log", path, sizeof(path));
-		g_logFile = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+		g_logFile = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, append ? OPEN_ALWAYS : CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+		if (append && g_logFile != INVALID_HANDLE_VALUE) SetFilePointer(g_logFile, 0, nullptr, FILE_END);
+	}
+
+	void CloseLog()
+	{
+		EnterCriticalSection(&g_logCs);
+		if (g_logFile != INVALID_HANDLE_VALUE) CloseHandle(g_logFile);
+		g_logFile = INVALID_HANDLE_VALUE;
+		LeaveCriticalSection(&g_logCs);
+		DeleteCriticalSection(&g_logCs);
 	}
 
 	void Log(const char* fmt, ...)
@@ -432,6 +449,7 @@ namespace
 		int   key = VK_F11;
 		// D1
 		char  carFile[MAX_PATH] = "";  // fixed car file (empty: the path BeamNG reports)
+		char  restartGtaCmd[512] = "";  // v2.85 (OpenGTANG) RestartGtaCommand: what the menu's Restart GTA starts (empty: Steam's GTA V)
 		int   maxTex = 2048;
 		int   maxDataTex = 1024;       // normal/metallic/roughness/opacity maps
 		int   meshAxes = -1;           // -1 auto, 0 glTF, 1 BeamNG
@@ -754,6 +772,7 @@ namespace
 			}
 		}
 		GetPrivateProfileStringA(kSec, "CarFile", "", c.carFile, sizeof(c.carFile), path);
+		GetPrivateProfileStringA(kSec, "RestartGtaCommand", "", c.restartGtaCmd, sizeof(c.restartGtaCmd), path);  // v2.85 (OpenGTANG)
 		c.maxTex = std::clamp(int(GetPrivateProfileIntA(kSec, "MaxTextureSize", 2048, path)), 16, 8192);
 		c.texCompression = GetPrivateProfileIntA(kSec, "TextureCompression", 1, path) != 0;
 		c.maxDataTex = std::clamp(int(GetPrivateProfileIntA(kSec, "MaxDataTextureSize", 1024, path)), 16, 8192);
@@ -6487,6 +6506,7 @@ namespace
 		uint32_t                     readTiles = 0, wroteTiles = 0, regionsRead = 0, errors = 0;
 		bool                         oldLogged = false;
 		int                          pending = 0;
+		bool                         quit = false;  // v2.85 (OpenGTANG): the mod is being unloaded (the thread ends when the queue is empty)
 	} g_map;
 
 	constexpr uint32_t kMapMagic = 0x314D4247;  // "GBM1"
@@ -6507,10 +6527,14 @@ namespace
 		for (;;) {
 			MapJob job;
 			AcquireSRWLockExclusive(&g_map.lock);
-			while (g_map.jobs.empty()) SleepConditionVariableSRW(&g_map.cv, &g_map.lock, INFINITE, 0);
-			job = std::move(g_map.jobs.front());
-			g_map.jobs.pop_front();
+			while (g_map.jobs.empty() && !g_map.quit) SleepConditionVariableSRW(&g_map.cv, &g_map.lock, INFINITE, 0);
+			const bool quit = g_map.jobs.empty();  // (v2.85: asked to end, nothing left to write)
+			if (!quit) {
+				job = std::move(g_map.jobs.front());
+				g_map.jobs.pop_front();
+			}
 			ReleaseSRWLockExclusive(&g_map.lock);
+			if (quit) return 0;
 			if (job.kind == 1) {
 				job.recs.clear();
 				if (FILE* f = fopen(job.path.c_str(), "rb")) {
@@ -11865,7 +11889,15 @@ namespace
 		snprintf(b, sizeof(b), "'%s' (process %lu%s)", title, (unsigned long)pid, pid == GetCurrentProcessId() ? ", GTA" : "");
 		return b;
 	}
+	std::atomic<int> g_wakeThreads{ 0 };  // v2.85 (OpenGTANG): running (the mod waits for them before it unloads)
+	DWORD WakeThreadBody(LPVOID param);
 	DWORD WINAPI WakeThread(LPVOID param)
+	{
+		const DWORD r = WakeThreadBody(param);
+		g_wakeThreads.fetch_sub(1);
+		return r;
+	}
+	DWORD WakeThreadBody(LPVOID param)
 	{
 		std::unique_ptr<WakeJob> j(static_cast<WakeJob*>(param));
 		Sleep(150);  // the BeamNG mod has switched the option by now (it answers after doing it; at the end: one BeamNG frame)
@@ -11925,9 +11957,13 @@ namespace
 		Log("sound: waking BeamNG (%s); GTA's display mode: %s", when, g_exclusiveFs.load() == 0 ? "windowed/borderless" : "unknown");
 		auto* j = new WakeJob{ GetForegroundWindow(), 1, g_cfg.soundWakeMs, {} };
 		strncpy(j->when, when, sizeof(j->when) - 1);
+		g_wakeThreads.fetch_add(1);
 		HANDLE th = CreateThread(nullptr, 0, WakeThread, j, 0, nullptr);
 		if (th) CloseHandle(th);
-		else delete j;
+		else {
+			delete j;
+			g_wakeThreads.fetch_sub(1);
+		}
 	}
 
 	void DrvOnOk(const std::string& reply)
@@ -15256,10 +15292,12 @@ namespace
 		bool        (*get)();       // on/off kept somewhere else
 		void        (*set)(bool);
 		const char* help;
+		int         color = 0;  // v2.85: 1 a red header, 2 a light red line (Restart GTA/Mod)
 	};
 
 	struct MenuState
 	{
+		int    confirm = 0, mainSel = 0;  // v2.85: the Yes / No page open (1 restart GTA, 2 restart the mod), and the line to go back to
 		int    sel = 1, top = 0;
 		double holdT = 0, repT = 0;
 		int    holdVk = 0;
@@ -15370,6 +15408,51 @@ namespace
 		Log("crash damage to you: %s (menu)", on ? "ON" : "OFF");
 	}
 
+	// v2.85 (OpenGTANG): the menu's "Restart GTA/Mod" (RestartTick does it, a step per script tick)
+	struct RestartState
+	{
+		int    kind = 0;  // 0 none, 1 restart GTA, 2 restart the mod
+		int    step = 0;
+		double t0 = 0, tStep = 0;
+		bool   waitNoted = false;
+	} g_restart;
+
+	void RestartRequest(int kind, const char* why)
+	{
+		if (g_restart.kind) return;
+		if (kind == 2 && !g_loader) {
+			Notify("Restart the mod needs the OpenGTANG loader: GtaBeamD1.asi with GtaBeamD1_core.dll next to it.");
+			return;
+		}
+		g_restart = RestartState{};
+		g_restart.kind = kind;
+		g_restart.t0 = g_restart.tStep = NowSeconds();
+		g_menuOpen = false;
+		g_menu.confirm = 0;
+		Log("restart (v2.85): %s asked (%s)", kind == 1 ? "restart GTA V" : "restart the mod", why);
+		Notify(kind == 1 ? "Restarting GTA V..." : "Restarting the OpenGTANG mod...");
+	}
+	void MenuAskRestartGta()
+	{
+		g_menu.mainSel = g_menu.sel;
+		g_menu.confirm = 1;
+		g_menu.sel = 2;  // (No)
+		g_menu.top = 0;
+	}
+	void MenuAskRestartMod()
+	{
+		g_menu.mainSel = g_menu.sel;
+		g_menu.confirm = 2;
+		g_menu.sel = 2;
+		g_menu.top = 0;
+	}
+	void MenuConfirmYes() { RestartRequest(g_menu.confirm, "menu"); }
+	void MenuConfirmNo()
+	{
+		g_menu.sel = g_menu.mainSel;
+		g_menu.confirm = 0;
+	}
+
 	std::vector<MenuItem> MenuItems()
 	{
 		Config& c = g_cfg;
@@ -15424,6 +15507,34 @@ namespace
 		m.push_back(H("Other"));
 		m.push_back(A("Reload ini and json", ReloadAll, "Ctrl+F11: reads GtaBeamD1.ini and the json files again."));
 		m.push_back(A("Close", MenuClose, "Backspace or F7 closes the menu too."));
+		{
+			// v2.85: restart GTA or the mod, each through a Yes / No page
+			MenuItem h = H("Restart GTA/Mod");
+			h.color = 1;
+			m.push_back(h);
+			MenuItem g = A("Restart Grand Theft Auto V?", MenuAskRestartGta, "Closes GTA V and starts it again. Drive mode stops first; unsaved story progress is lost.");
+			g.color = 2;
+			m.push_back(g);
+			MenuItem o = A("Restart the OpenGTANG mod?", MenuAskRestartMod,
+				"Loads the mod again (a new GtaBeamD1_core.dll too) without closing GTA. Also Ctrl+Shift+F7.");
+			o.color = 2;
+			m.push_back(o);
+		}
+		if (g_menu.confirm) {
+			// the Yes / No page in place of the menu
+			const bool gta = g_menu.confirm == 1;
+			std::vector<MenuItem> q;
+			MenuItem h = H(gta ? "Restart Grand Theft Auto V?" : "Restart the OpenGTANG mod?");
+			h.color = 1;
+			q.push_back(h);
+			MenuItem y = A("Yes", MenuConfirmYes,
+				gta ? "GTA V closes now and starts again by itself (Steam). Unsaved story progress is lost."
+				    : "Drive mode stops, the car comes off; the mod unloads and loads again. GTA keeps running.");
+			y.color = 2;
+			q.push_back(y);
+			q.push_back(A("No", MenuConfirmNo, "Back to the menu (Backspace too)."));
+			return q;
+		}
 		return m;
 	}
 
@@ -15499,6 +15610,7 @@ namespace
 		const bool   noMods = !(GetAsyncKeyState(VK_SHIFT) & 0x8000) && !(GetAsyncKeyState(VK_CONTROL) & 0x8000) && !(GetAsyncKeyState(VK_MENU) & 0x8000);
 		if (keyNow && !keyWas && focus && noMods && !paused) {
 			g_menuOpen = !g_menuOpen;
+			if (g_menu.confirm) MenuConfirmNo();  // v2.85: it opens on the menu, not on a Yes / No page
 			CallVoid(N::PLAY_SOUND_FRONTEND, -1, g_menuOpen ? "SELECT" : "BACK", "HUD_FRONTEND_DEFAULT_SOUNDSET", 0);
 			// (the keys held as it opens don't count as presses)
 			for (int vk : { VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_RETURN, VK_BACK, VK_NUMPAD8, VK_NUMPAD2, VK_NUMPAD4, VK_NUMPAD6, VK_NUMPAD5 })
@@ -15522,6 +15634,11 @@ namespace
 			if (either(VK_RIGHT, VK_NUMPAD6)) dir = 1;
 			if (either(VK_RETURN, VK_NUMPAD5)) dir = 0;
 			if (MenuPressed(VK_BACK, now)) {
+				if (g_menu.confirm) {  // v2.85: the Yes / No page back to the menu
+					MenuConfirmNo();
+					CallVoid(N::PLAY_SOUND_FRONTEND, -1, "BACK", "HUD_FRONTEND_DEFAULT_SOUNDSET", 0);
+					return;
+				}
 				g_menuOpen = false;
 				CallVoid(N::PLAY_SOUND_FRONTEND, -1, "BACK", "HUD_FRONTEND_DEFAULT_SOUNDSET", 0);
 				return;
@@ -15535,12 +15652,13 @@ namespace
 			}
 			if (dir != -2) {
 				const MenuItem& it = items[g_menu.sel];
+				const int       page = g_menu.confirm;
 				if (it.kind == 2 && dir != 0) {  // (left / right switch an on/off too)
 					MenuChange(it, 0);
 				} else {
 					MenuChange(it, dir);
 				}
-				if (!g_menuOpen) return;
+				if (!g_menuOpen || g_menu.confirm != page) return;  // (v2.85: a Yes / No page opened or closed: drawn next tick)
 			}
 		}
 		// draw (left side, inside GTA's safe zone)
@@ -15562,13 +15680,23 @@ namespace
 			const bool      on = r == g_menu.sel;
 			const bool      locked = it.idleOnly && g_drv.state != 0;
 			if (it.kind == 0) {
+				if (it.color == 1) {  // v2.85: red (Restart GTA/Mod)
+					CallVoid(N::DRAW_RECT, x0 + w * 0.5f, y + rh * 0.5f, w, rh, 70, 0, 0, 230, 0);
+					GaugeText(x0 + 0.008f, y + 0.004f, 0.28f, 4, 1, 0.0f, it.label, 255, 45, 45);
+					continue;
+				}
 				CallVoid(N::DRAW_RECT, x0 + w * 0.5f, y + rh * 0.5f, w, rh, 15, 15, 15, 225, 0);
 				GaugeText(x0 + 0.008f, y + 0.004f, 0.28f, 4, 1, 0.0f, it.label, 0, 200, 185);
 				continue;
 			}
 			CallVoid(N::DRAW_RECT, x0 + w * 0.5f, y + rh * 0.5f, w, rh, on ? 235 : 0, on ? 235 : 0, on ? 235 : 0, on ? 235 : 170, 0);
 			const int tc = on ? 10 : locked ? 130 : 240;
-			GaugeText(x0 + 0.012f, y + 0.002f, 0.34f, 4, 1, 0.0f, it.label, tc, tc, tc);
+			if (it.color == 2) {  // v2.85: light red
+				if (on) GaugeText(x0 + 0.012f, y + 0.002f, 0.34f, 4, 1, 0.0f, it.label, 200, 20, 20);
+				else GaugeText(x0 + 0.012f, y + 0.002f, 0.34f, 4, 1, 0.0f, it.label, 255, 135, 135);
+			} else {
+				GaugeText(x0 + 0.012f, y + 0.002f, 0.34f, 4, 1, 0.0f, it.label, tc, tc, tc);
+			}
 			char v[32] = "";
 			if (it.kind == 1) snprintf(v, sizeof(v), ">");
 			else if (it.kind == 2) snprintf(v, sizeof(v), "%s", (it.get ? it.get() : *it.b) ? "ON" : "OFF");
@@ -16169,13 +16297,116 @@ namespace
 		}
 	}
 
-	void ScriptMain()
+	// v2.85 (OpenGTANG): Restart GTA. A hidden PowerShell waits for this GTA to close (and Steam's launcher after it), then starts
+	// GTA again: RestartGtaCommand from the ini, else Steam's GTA V (Legacy 271590, Enhanced 3240220), else PlayGTAV.exe.
+	bool LaunchGtaAgain()
 	{
-		Log("script thread running");
+		char exe[MAX_PATH] = {};
+		GetModuleFileNameA(nullptr, exe, MAX_PATH);
+		std::string       dir = exe;
+		const size_t      sl = dir.find_last_of("\\/");
+		dir = sl == std::string::npos ? std::string(".") : dir.substr(0, sl);
+		const std::string exeName = sl == std::string::npos ? std::string(exe) : std::string(exe + sl + 1);
+		std::string       what = g_cfg.restartGtaCmd;
+		if (what.empty()) {
+			const bool enhanced = _stricmp(exeName.c_str(), "GTA5_Enhanced.exe") == 0;
+			if (FileExists((dir + "\\steam_api64.dll").c_str())) what = enhanced ? "steam://rungameid/3240220" : "steam://rungameid/271590";
+			else if (FileExists((dir + "\\PlayGTAV.exe").c_str())) what = dir + "\\PlayGTAV.exe";
+			else what = exe;
+		}
+		auto q = [](const std::string& v) {
+			std::string o = "'";
+			for (char ch : v) {
+				if (ch == '\'') o += '\'';
+				o += ch;
+			}
+			return o + "'";
+		};
+		const bool  url = what.find("://") != std::string::npos;
+		std::string ps = "$ErrorActionPreference='SilentlyContinue'; Wait-Process -Id " + std::to_string(GetCurrentProcessId()) +
+		                 " -Timeout 120; $n=0; while ((Get-Process -Name PlayGTAV,GTAVLauncher,GTA5,GTA5_Enhanced) -and $n -lt 90) { Start-Sleep 1; $n++ }; "
+		                 "Start-Sleep 3; Start-Process " + q(what) + (url ? std::string() : " -WorkingDirectory " + q(dir));
+		std::string cmd = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"" + ps + "\"";
+		Log("restart (v2.85): GTA V starts again with: %s", what.c_str());
+		STARTUPINFOA        si{ sizeof(si) };
+		PROCESS_INFORMATION pi{};
+		std::vector<char>   buf(cmd.begin(), cmd.end());
+		buf.push_back(0);
+		// (out of GTA's job, if it is in one, so it isn't closed with GTA)
+		BOOL ok = CreateProcessA(nullptr, buf.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP, nullptr, dir.c_str(), &si, &pi);
+		if (!ok) ok = CreateProcessA(nullptr, buf.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP, nullptr, dir.c_str(), &si, &pi);
+		if (!ok) {
+			Log("restart: the helper could not start (error %lu)", GetLastError());
+			return false;
+		}
+		CloseHandle(pi.hThread);
+		CloseHandle(pi.hProcess);
+		return true;
+	}
+
+	// a step per tick; true: the game side is put back for Restart the mod (ScriptMain ends, the loader takes over)
+	bool RestartTick()
+	{
+		RestartState& R = g_restart;
+		if (!R.kind) return false;
+		const double now = NowSeconds();
+		if (R.step == 0) {
+			// Restart the mod waits for what runs in the background (export, car load, matching)
+			const bool busy = R.kind == 2 && (g_workerBusy.load() || g_getCar.on || g_am.state != 0);
+			if (busy) {
+				if (!R.waitNoted) Notify("Restart: waiting for the export / car match to finish...");
+				R.waitNoted = true;
+				return false;
+			}
+			g_menuOpen = false;
+			g_seat.on = false;
+			if (g_drv.state != 0) DriveStop("restart", false);
+			R.step = 1;
+			R.tStep = now;
+			return false;
+		}
+		if (R.step == 1) {
+			if (g_land.on && now - R.tStep < 4.0) return false;  // (GTA's car back on its wheels first)
+			if (R.kind == 1) {
+				if (!LaunchGtaAgain()) {
+					Notify("Restart GTA: couldn't start the helper (see GtaBeamD1.log). Restart GTA yourself.");
+					R = RestartState{};
+					return false;
+				}
+				R.step = 2;
+				R.tStep = now;
+				return false;
+			}
+			// Restart the mod: the drawn cars come off their GTA cars (which show again)
+			if (g_tgt.mode != 0) Detach("restart the mod");
+			for (const ShowCar& sc : g_shows) {
+				if (!Call<int>(N::DOES_ENTITY_EXIST, sc.veh)) continue;
+				SetVisible(sc.veh, true);
+				int h = sc.veh;
+				CallVoid(N::SET_VEHICLE_AS_NO_LONGER_NEEDED, &h);
+			}
+			g_shows.clear();
+			g_showVeh.clear();
+			Log("restart (v2.85): game side put back (%.1f s)", now - R.t0);
+			return true;
+		}
+		if (R.step == 2 && now - R.tStep > 0.7) {  // (the feed message shows for a moment)
+			Log("restart (v2.85): closing GTA V now; it starts again in a few seconds");
+			CloseLog();
+			TerminateProcess(GetCurrentProcess(), 0);
+		}
+		return false;
+	}
+
+	// v2.85: ends (returns) only for Restart the mod
+	void ScriptLoop()
+	{
+		Log("script thread running%s", g_loader ? " (loaded by the OpenGTANG loader)" : "");
 		uint32_t tick = 0;
 		for (;;) {
 			if (tick == 60) {
-				Notify("GtaBeam D1 %s loaded. Shift+F11: get car from BeamNG. F11: put it on a GTA car.", D1_VERSION);
+				if (g_loadNo > 1) Notify("OpenGTANG %s reloaded (load %d). F7: menu.", D1_VERSION, g_loadNo);
+				else Notify("GtaBeam D1 %s loaded. Shift+F11: get car from BeamNG. F11: put it on a GTA car.", D1_VERSION);
 				if (g_cfg.autoLoad && FileExists(DefaultCarPath().c_str())) {
 					StartWorker(Job::Reload);
 				}
@@ -16187,8 +16418,15 @@ namespace
 			uint64_t prev = g_tickUsMax.load(std::memory_order_relaxed);
 			while (us > prev && !g_tickUsMax.compare_exchange_weak(prev, us)) {
 			}
+			if (g_restartKey.exchange(false)) RestartRequest(2, "Ctrl+Shift+F7");
+			if (RestartTick()) return;
 			scriptWait(0);
 		}
+	}
+	void ScriptMain()
+	{
+		ScriptLoop();
+		for (;;) scriptWait(0);  // (an .asi of its own can't be unloaded)
 	}
 
 	// ---------------------------------------------------------------------------------------
@@ -21709,7 +21947,7 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 	void OnPresent(void* swapChain)
 	{
 		auto* sc = static_cast<IDXGISwapChain*>(swapChain);
-		if (!sc) {
+		if (!sc || g_stopping.load()) {
 			return;
 		}
 		LARGE_INTEGER qf, q0, q1;
@@ -21864,6 +22102,104 @@ float PSProbe(float4 pos : SV_Position) : SV_Target
 			}
 		}
 	}
+
+	// ---------------------------------------------------------------------------------------
+	// v2.85 (OpenGTANG): Restart the mod. The game side has been put back (RestartTick); now the mod's threads, sockets and
+	// D3D11 hooks end (CoreStop, script thread), then, once the loader stopped calling Present here and GTA drew a few more
+	// frames, its video memory is let go (CoreFinal) and the loader unloads GtaBeamD1_core.dll.
+	// ---------------------------------------------------------------------------------------
+	void WaitScript(double secs, bool (*done)())
+	{
+		const double t0 = NowSeconds();
+		while (!done() && NowSeconds() - t0 < secs) scriptWait(0);
+	}
+
+	void CoreStop()
+	{
+		Log("restart (v2.85): stopping the mod's threads, sockets and hooks");
+		// the drive receiver
+		g_dnet.stop.store(true);
+		if (g_dnet.s != INVALID_SOCKET) closesocket(g_dnet.s);
+		if (g_dnet.thread) {
+			if (WaitForSingleObject(g_dnet.thread, 3000) != WAIT_OBJECT_0) Log("restart: WARNING: the drive receiver didn't end");
+			CloseHandle(g_dnet.thread);
+			g_dnet.thread = nullptr;
+		}
+		g_dnet.s = INVALID_SOCKET;
+		// the saved-map writer (what's queued is written first)
+		if (g_map.thread) {
+			AcquireSRWLockExclusive(&g_map.lock);
+			g_map.quit = true;
+			ReleaseSRWLockExclusive(&g_map.lock);
+			WakeAllConditionVariable(&g_map.cv);
+			if (WaitForSingleObject(g_map.thread, 10000) != WAIT_OBJECT_0) Log("restart: WARNING: the map writer didn't end");
+			CloseHandle(g_map.thread);
+			g_map.thread = nullptr;
+		}
+		// BeamNG sound wakes (short) and the export / car load worker
+		WaitScript(5.0, [] { return g_wakeThreads.load() == 0; });
+		WaitScript(30.0, [] { return !g_workerBusy.load(); });
+		if (g_wakeThreads.load() || g_workerBusy.load())
+			Log("restart: WARNING: a worker thread is still running (%d wake, worker %d)", g_wakeThreads.load(), int(g_workerBusy.load()));
+		// GTA's D3D11 functions back to GTA's own (calls already inside ours finish before the loader unloads us)
+		UnhookAll();
+		g_stopping.store(true);
+		Log("restart (v2.85): hooks removed; the loader unloads the mod next");
+	}
+
+	void CoreFinal()
+	{
+		// (the render thread doesn't call in here any more)
+		Renderer& r = g_r;
+		ReleaseDepth();
+		r.car.Release();
+		for (auto& x : g_showGpu) x.Release();
+		g_showGpu.clear();
+		for (auto*& t : g_cap.held) SafeRelease(t);
+		SafeRelease(g_dpSeen);
+		for (auto& v : r.dpViews) {
+			SafeRelease(v.srv);
+			v = Renderer::DpView{};
+		}
+		r.sunDepth.Release();
+		r.aoMaps.Release();
+		for (int i = 0; i < 4; ++i) {
+			SafeRelease(r.pick.rtv[i]);
+			SafeRelease(r.pick.rt[i]);
+			SafeRelease(r.pick.staging[i]);
+		}
+		SafeRelease(r.pick.dsv);
+		SafeRelease(r.pick.depth);
+		for (int i = 0; i < 2; ++i) {
+			SafeRelease(r.llSrv[i]);
+			SafeRelease(r.llRtv[i]);
+			SafeRelease(r.llTex[i]);
+			SafeRelease(r.llSrvO[i]);
+			SafeRelease(r.llRtvO[i]);
+			SafeRelease(r.llTexO[i]);
+		}
+		IUnknown** all[] = {
+			(IUnknown**)&r.vsCar, (IUnknown**)&r.vsFull, (IUnknown**)&r.vsDepthDir, (IUnknown**)&r.psCar, (IUnknown**)&r.psPick,
+			(IUnknown**)&r.psDepthView, (IUnknown**)&r.psProbe, (IUnknown**)&r.psCross, (IUnknown**)&r.vsShadowMap, (IUnknown**)&r.psShadowMap,
+			(IUnknown**)&r.psGroundShadow, (IUnknown**)&r.psEnvUpdate, (IUnknown**)&r.psComposite, (IUnknown**)&r.psDownsample,
+			(IUnknown**)&r.psLightProbe, (IUnknown**)&r.lightRtv, (IUnknown**)&r.lightTex, (IUnknown**)&r.lightStaging, (IUnknown**)&r.gbufSrv,
+			(IUnknown**)&r.psDpCalib, (IUnknown**)&r.dpCalRtv, (IUnknown**)&r.dpCalTex, (IUnknown**)&r.dpCalStaging, (IUnknown**)&r.layerPremul,
+			(IUnknown**)&r.layerAdd, (IUnknown**)&r.composite, (IUnknown**)&r.clampLin, (IUnknown**)&r.cmpSamp, (IUnknown**)&r.llSamp,
+			(IUnknown**)&r.rsDepth, (IUnknown**)&r.contactSrv, (IUnknown**)&r.contactRtv, (IUnknown**)&r.contactTex, (IUnknown**)&r.sunSrv,
+			(IUnknown**)&r.sunRtv, (IUnknown**)&r.sunTex, (IUnknown**)&r.occlCb, (IUnknown**)&r.holeCb, (IUnknown**)&r.envSrv, (IUnknown**)&r.envTex,
+			(IUnknown**)&r.envHdrSrv, (IUnknown**)&r.envHdrRtv, (IUnknown**)&r.envHdrTex, (IUnknown**)&r.layerSrv, (IUnknown**)&r.layerRtv,
+			(IUnknown**)&r.layerTex, (IUnknown**)&r.layout, (IUnknown**)&r.cb, (IUnknown**)&r.matCb, (IUnknown**)&r.partCb, (IUnknown**)&r.opaque,
+			(IUnknown**)&r.alphaBlend, (IUnknown**)&r.raster, (IUnknown**)&r.noDepth, (IUnknown**)&r.depthWrite, (IUnknown**)&r.depthRead,
+			(IUnknown**)&r.point, (IUnknown**)&r.linear, (IUnknown**)&r.probeRtv, (IUnknown**)&r.probeTex, (IUnknown**)&r.probeStaging,
+			(IUnknown**)&r.ownDsv, (IUnknown**)&r.ownDepth,
+		};
+		for (IUnknown** p : all) SafeRelease(*p);
+		SafeRelease(r.ctx);
+		SafeRelease(r.dev);
+		g_immediate = nullptr;
+		Log("restart (v2.85): video memory let go; unloaded (load %d)", g_loadNo);
+		CloseLog();
+	}
 }
 
 extern "C" __declspec(dllexport) const char* GtaBeamD1Version()
@@ -21871,32 +22207,79 @@ extern "C" __declspec(dllexport) const char* GtaBeamD1Version()
 	return D1_VERSION;
 }
 
-extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
+// ---------------------------------------------------------------------------------------
+// v2.85 (OpenGTANG): what the loader (GtaBeamD1.asi, loader.cpp) calls. Its own Script Hook V script runs OgCoreMain and its
+// Present callback forwards to OgCorePresent; OgCoreMain returns when the mod is to be loaded again (Restart the mod).
+// ---------------------------------------------------------------------------------------
+constexpr int kCoreApi = 1;
+
+namespace
 {
-	switch (reason) {
-	case DLL_PROCESS_ATTACH:
-		g_module = instance;
-		DisableThreadLibraryCalls(instance);
-		InitLog();
-		Log("GtaBeamD1 %s (GTA x Beam kit %s: D1 + D3 + T2 drive mode + T3 GTA's ground in BeamNG) loaded", D1_VERSION, D1_VERSION);
+	void CoreStart()
+	{
+		Log("GtaBeamD1 %s (GTA x Beam kit %s: D1 + D3 + T2 drive mode + T3 GTA's ground in BeamNG) loaded%s", D1_VERSION, D1_VERSION,
+			g_loader ? " by the OpenGTANG loader" : "");
+		if (g_loadNo > 1) Log("restart (v2.85): this is load %d of the mod in this GTA session", g_loadNo);
 		if (GetModuleHandleA("GtaBeamD0.asi")) {
 			Log("WARNING: GtaBeamD0.asi is loaded too. Remove it from the GTA folder (D1 replaces it).");
 		}
 		LoadConfig();
 		LoadSurfaces();  // v2.4
+	}
+}
+
+extern "C" __declspec(dllexport) int OgCoreAttach(HMODULE loader, int loadNo)
+{
+	g_loader = loader;
+	g_module = loader;  // (the ini, the log and the other files are next to GtaBeamD1.asi)
+	g_loadNo = loadNo;
+	InitLog(loadNo > 1);
+	CoreStart();
+	return kCoreApi;
+}
+
+// the loader's script fiber; returns 1 once the game side is put back and the threads and hooks are gone
+extern "C" __declspec(dllexport) int OgCoreMain()
+{
+	ScriptLoop();
+	CoreStop();
+	return 1;
+}
+
+extern "C" __declspec(dllexport) void OgCorePresent(void* swapChain) { OnPresent(swapChain); }
+
+extern "C" __declspec(dllexport) void OgCoreRequestRestart() { g_restartKey.store(true); }
+
+// after the loader stopped calling Present here and GTA drew a few frames: video memory let go, the log closed
+extern "C" __declspec(dllexport) void OgCoreFinal() { CoreFinal(); }
+
+extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
+{
+	switch (reason) {
+	case DLL_PROCESS_ATTACH:
+		DisableThreadLibraryCalls(instance);
+		if (!g_module) g_module = instance;
+#ifdef GTANG_STANDALONE
+		// built as an .asi of its own (no loader, no Restart the mod)
+		InitLog();
+		CoreStart();
 		scriptRegister(instance, ScriptMain);
 		presentCallbackRegister(OnPresent);
+#endif
 		break;
 	case DLL_PROCESS_DETACH:
+#ifdef GTANG_STANDALONE
 		presentCallbackUnregister(OnPresent);
 		scriptUnregister(instance);
-		if (!reserved) {
+#endif
+		if (!reserved && !g_stopping.load()) {
+			// (GTA closing, or an unload that didn't go through OgCoreMain)
 			UnhookAll();
 			// v2.0: the drive receiver thread must not run on in unloaded code
 			g_dnet.stop.store(true);
 			if (g_dnet.s != INVALID_SOCKET) closesocket(g_dnet.s);
+			Log("unloaded");
 		}
-		Log("unloaded");
 		break;
 	}
 	return TRUE;
