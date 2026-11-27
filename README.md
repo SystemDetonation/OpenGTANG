@@ -1,155 +1,207 @@
-# GTA x Beam
+# OpenGTANG
 
-**Drive BeamNG.drive's soft-body cars in GTA V's world.**
+**Drive BeamNG.drive's soft-body cars, trucks and motorcycles in GTA V's world.**
 
-> **OpenGTANG** is a fork of [Treto420's GTA x Beam](https://github.com/Treto420/GTANG) (MIT). It adds motorcycles (2.84); an in-game menu with one-button setup, a hidden GTA vehicle matched to your BeamNG one by kind, seat position and size, crash boxes for GTA's bikes, and fixes for heavy machinery, wide tyres, right-side wheel spin and seat adjust (2.85). Everything else below is the original mod's.
+OpenGTANG is a fork of [GTA x Beam](https://github.com/Treto420/GTANG) by **Treto420** (MIT licence). GTA V runs the world, the walking and the guns. BeamNG.drive runs the car. Both games run at the same time and talk to each other on your PC. In GTA you see and drive your BeamNG car, with its real crumple, on GTA's streets, and GTA's traffic, people and lamp posts react to it.
 
-GTA V runs the world, the walking and the guns. BeamNG.drive runs the car. Both games run at the same time and talk to each other on your PC. In GTA you see and drive your BeamNG car, with its real crumple, on GTA's streets, and GTA's traffic, people and lamp posts react to it like they would to a normal GTA car.
+All of that is Treto420's work. OpenGTANG adds motorcycles, an in-game menu, a one-button car setup and a hot-reloading mod (see [What OpenGTANG adds](#what-opengtang-adds)). The original mod's full guide is in **[ORIGINAL_README.md](ORIGINAL_README.md)**, kept as Treto420 wrote it: how it works, tips, what works, known issues and all the settings.
 
-> Single-player only (story mode). Script Hook V closes GTA V in GTA Online. Free, non-commercial fan project; not affiliated with Rockstar Games or BeamNG GmbH.
+> Single-player only (story mode). Script Hook V closes GTA V in GTA Online. Free, non-commercial fan project; not affiliated with Rockstar Games, BeamNG GmbH or Treto420.
 
-## Quick start (5 minutes)
-1. **Download** `GTA_X_BEAM_v2.77.zip` from [Releases](https://github.com/Treto420/GTANG/releases/latest) (not the green **Code** button: that's the source code) and unzip it.
-   - For **2.83** (newer than that release): use the green **Code** button, **Download ZIP**, and take the `GTA` and `BeamNG` folders from it.
-2. **GTA V files:** copy everything in the `GTA` folder into your GTA V folder (the one with `GTA5.exe`).
-3. **BeamNG mod:** copy the `BeamNG\gtabridge` folder into `%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\mods\unpacked\` (paste that path into Explorer's address bar). Say yes to replacing files.
-4. **Start BeamNG first.** Load the level **Grid, Small, Pure** and spawn your car.
-5. **Start GTA V** (story mode). Get in a GTA car about the **same size** as your BeamNG car (see Tips).
-6. In GTA press **Shift+F11** (gets your car from BeamNG; the first time takes a while), then **F11** (puts it on your GTA car), then **F10** (drive).
-   - **Or the OpenGTANG way:** press **F7** and pick **Get car from BeamNG**. It exports your car, gets you the GTA vehicle that matches it (spawned under you if you're on foot) and puts the BeamNG car on it. Then press **F10**.
-7. **Turn MSAA off** in GTA's graphics settings. With MSAA on, the car can't be drawn inside GTA's frame and can look dark, see-through or glitchy.
+## Contents
+- [What OpenGTANG adds](#what-opengtang-adds)
+- [Requirements](#requirements)
+- [Download](#download)
+- [Install](#install)
+- [First drive](#first-drive)
+- [Updating](#updating)
+- [Uninstall](#uninstall)
+- [Keys](#keys-in-gta)
+- [The F7 menu](#the-f7-menu)
+- [Settings](#settings)
+- [Known issues](#known-issues)
+- [Troubleshooting and bug reports](#troubleshooting-and-bug-reports)
+- [Building from source](#building-from-source)
+- [Credits and licences](#credits-and-licences)
+
+## What OpenGTANG adds
+New in **2.84**:
+- **Motorcycles.** BeamNG bikes ride on GTA bikes, with the lean, the rider's pose, getting off and on, and GTA's crash ejection.
+
+New in **2.85**:
+- **In-game menu (F7).** The main switches and actions, saved to the ini as you change them.
+- **Get car from BeamNG.** One button: exports your BeamNG car, gets you the GTA vehicle that matches it (spawned under you if you're on foot) and puts the BeamNG car on it. Then F10 drives.
+- **Auto-match.** The hidden GTA vehicle is picked by kind (BeamNG's Body Style: sedan, pickup, bus, chopper, wheel loader...), then by where you'd sit, then by size. Each pick is remembered per BeamNG vehicle.
+- **Restart GTA/Mod.** The bottom of the F7 menu restarts GTA V, or reloads the mod without closing GTA (also Ctrl+Shift+F7). A new mod build is picked up live.
+- **Seat adjust** works with `PuppetSolid=1`.
+- **GTA's bikes** get crash boxes in BeamNG.
+- **Fixes:**
+  - BeamNG 0.40's driver seat.
+  - Bikes that lean on their stand.
+  - Heavy machinery: parts under two parents, wide tyres.
+  - Right-side wheels spinning backwards.
 
 ## Requirements
-- GTA V **Legacy** for PC (not the Enhanced edition), story mode, with [Script Hook V](http://www.dev-c.com/gtav/scripthookv/) and its ASI loader (`dinput8.dll`).
-- BeamNG.drive (made on 0.40).
+- **GTA V Legacy** for PC (Steam, Rockstar Games Launcher or Epic), in story mode. Not the Enhanced edition.
+- **[Script Hook V](http://www.dev-c.com/gtav/scripthookv/)** with its ASI loader (`dinput8.dll`). It isn't included: get it from its own site, in the version for your GTA update.
+- **BeamNG.drive** 0.40 or newer.
 - A PC that can run both games at once. 8 GB of video memory or more is recommended; video memory is what runs out first.
+
+## Download
+Get **`OpenGTANG_v2.85.zip`** from **[Releases](https://github.com/SystemDetonation/OpenGTANG/releases/latest)**. Don't use the green **Code** button: that's the source code. Unzip it anywhere.
+
+Inside:
+```
+OpenGTANG_v2.85\
+  GTA\        -> goes into your GTA V folder
+  BeamNG\     -> the gtabridge folder goes into BeamNG's mods folder
+  INSTALL.txt, README.md, ORIGINAL_README.md, LICENSE, licences\
+```
+
+## Install
+### 1. Script Hook V (once)
+1. Download Script Hook V from [dev-c.com](http://www.dev-c.com/gtav/scripthookv/).
+2. From its `bin` folder, copy `ScriptHookV.dll` and `dinput8.dll` into your **GTA V folder** (the one with `GTA5.exe`).
+
+Where the GTA V folder usually is:
+
+| Store | Folder |
+|---|---|
+| Steam | `C:\Program Files (x86)\Steam\steamapps\common\Grand Theft Auto V` (or Steam: right-click GTA V, **Manage**, **Browse local files**) |
+| Rockstar Games Launcher | `C:\Program Files\Rockstar Games\Grand Theft Auto V` |
+| Epic Games | `C:\Program Files\Epic Games\GTAV` |
+
+### 2. The GTA V part
+Copy **everything in the zip's `GTA` folder** into your GTA V folder, next to `GTA5.exe`:
+
+| File | What it is |
+|---|---|
+| `GtaBeamD1.asi` | The OpenGTANG loader. Script Hook V loads it. |
+| `GtaBeamD1_core.dll` | The mod itself. The loader loads it. Both files are needed. |
+| `GtaBeamD1.ini` | Settings, with comments. |
+| `GtaBeamD1_props.json`, `GtaBeamD1_surfaces.json`, `GtaBeamD1_traffic.json`, `GtaBeamD1_weapons.json` | Game content: props, ground grip, traffic masses, weapon damage. |
+
+### 3. The BeamNG.drive part
+1. Open this folder: paste `%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\mods\unpacked\` into Explorer's address bar and press Enter. If `unpacked` doesn't exist yet, make it.
+2. Copy the zip's **`BeamNG\gtabridge`** folder into it. The result is `...\mods\unpacked\gtabridge\lua\...`, `...\gtabridge\scripts\...` and `...\gtabridge\vehicles\...`.
+3. In BeamNG, check that **gtabridge** is enabled in the **Mods** menu.
+
+### 4. GTA's graphics setting
+Turn **MSAA off** in GTA's graphics settings. With MSAA on, the car can't be drawn inside GTA's frame and can look dark, see-through or glitchy.
+
+## First drive
+1. **Start BeamNG first.** Load the level **Grid, Small, Pure** (small and light) and spawn your car or bike.
+2. **Start GTA V** in story mode. A message says the mod has loaded.
+3. Press **F7** and pick **Get car from BeamNG**. The first export takes a while.
+4. Press **F10** to drive: BeamNG's physics drive the car, with your own BeamNG controls. **F10** again stops.
+
+The classic keys still work: **Shift+F11** gets the car, **F11** puts it on the GTA car you're in, **F10** drives.
+
+**Tip:** run BeamNG small and light (window mode, 1280x720, the lowest graphics settings). You only see GTA's picture, so BeamNG's graphics are wasted video memory. More tips are in [ORIGINAL_README.md](ORIGINAL_README.md#tips).
+
+## Updating
+**From an older OpenGTANG**, or **from Treto420's GTA x Beam (2.77, 2.83)**:
+1. Back up your `GtaBeamD1.ini` if you changed settings.
+2. Copy the zip's `GTA` files into the GTA V folder and say yes to replacing. GTA x Beam's single `GtaBeamD1.asi` is replaced by the OpenGTANG loader, and `GtaBeamD1_core.dll` is new.
+3. Copy `BeamNG\gtabridge` over the old one in `mods\unpacked` and say yes to replacing. Restart BeamNG: the BeamNG mod changed in 2.85.
+4. Put your own values back in the new `GtaBeamD1.ini`. An old ini also still works: settings it doesn't have use their defaults.
+
+Later OpenGTANG builds can be swapped in without closing GTA: copy a new `GtaBeamD1_core.dll` over the old one and press **Ctrl+Shift+F7**. A new `GtaBeamD1.asi` still needs a GTA restart.
+
+## Uninstall
+- GTA V folder: delete `GtaBeamD1.asi`, `GtaBeamD1_core.dll`, every `GtaBeamD1*` file (ini, json, logs, txt), and the `GtaBeamD1_map` folder (the saved ground of GTA's world).
+- BeamNG: delete `%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\mods\unpacked\gtabridge` and `...\current\gtabridge` (exports and the log).
+- Remove Script Hook V (`ScriptHookV.dll`, `dinput8.dll`) only if no other mod uses it.
 
 ## Keys (in GTA)
 | Key | What it does |
 |---|---|
-| **F7** | In-game menu (2.85): the main switches and actions, saved to the ini as you change them. Its **Get car from BeamNG** does the whole setup: exports the car, gets you the GTA vehicle closest to its size (spawned where you stand if you're on foot) and puts the BeamNG car on it, so F10 is all that's left |
+| **F7** | OpenGTANG menu (see below) |
+| **Ctrl+Shift+F7** | Restart the mod without closing GTA (loads a new `GtaBeamD1_core.dll` if there is one) |
 | **Shift+F11** | Get the car from BeamNG (export). Do it again after you change the car in BeamNG. |
-| **F11** | Put the BeamNG car on the GTA car you're in or next to (press again to take it off) |
+| **F11** | Put the BeamNG car on the GTA car you're in or next to (again: take it off) |
 | **F10** | Drive mode on/off: BeamNG's physics drive the car |
 | **Shift+F10** | On-screen drive check (what goes to BeamNG and back) |
-| **Ctrl+Shift+F10** | Seat adjust in drive mode: arrow keys and Page Up / Page Down, press again to save |
-| **Ctrl+F9** | Crash damage to you on/off (off by default, 2.81) |
+| **Ctrl+Shift+F10** | Seat adjust in drive mode: arrow keys and Page Up / Page Down, again to save |
+| **Ctrl+F9** | Crash damage to you on/off (off by default) |
 | **Ctrl+F10** | Timing recording (only for bug reports) |
 | **Ctrl+F11** | Re-read the ini and json files without restarting |
-| **Ctrl+Shift+F7** | Restart the mod without restarting GTA (2.85, same as the F7 menu's **Restart the OpenGTANG mod?**) |
 | **Ctrl+Shift+F11** | Show cars: park the BeamNG car on a GTA car and keep it there (up to 4) |
 | **Ctrl+Shift+F12** | View modes (for testing) |
 | **D-pad down** | Swap the controller between GTA (aim, shoot) and BeamNG (drive) while driving |
 
 Driving uses your own BeamNG controls and bindings (gears, clutch, drive modes).
 
-## Tips
-- **Pick a GTA car the same size as your BeamNG car.** GTA's traffic, people and props hit an invisible GTA car hidden under your BeamNG car. If the GTA car is smaller, things go into your BeamNG car before they react; if it's bigger, they react before they touch it. A trainer such as Menyoo makes it easy to spawn the right one (a sedan for a sedan, a jeep for a lifted truck). **Or let the mod pick it** (see Auto-match below).
-- **Auto-match** (2.85; F7 menu's **Get car from BeamNG**, or `AutoMatchCar=1` for F11). The mod picks the GTA vehicle in three steps:
-  1. **Same kind.** BeamNG's own vehicle info (its "Body Style": Sedan, Hatchback, Pickup, Bus, Chopper, Sport bike, Wheel Loader...) decides the GTA kind: a chopper gets a GTA chopper, a bus a bus, a wheel loader heavy machinery. GTA bikes are sorted by hand into choppers, cruisers, sport bikes, dirt bikes and scooters.
-  2. **Where you sit.** A hidden copy of your character sits in the closest GTA vehicles of that kind, and the one whose driver's head lands nearest BeamNG's driver seat wins (typically within 10-20 cm for cars). Vehicles without a driver's camera in BeamNG (like many motorcycle mods) skip this step.
-  3. **Size**, and a GTA model your BeamNG vehicle is named after wins outright (`gta4b_bati` gets the Bati).
+## The F7 menu
+Up / Down pick, Left / Right change, Enter does it, Backspace or F7 closes. Changes are used at once and saved to `GtaBeamD1.ini`. Settings that drive mode reads when it starts are locked while you drive.
 
-  Each pick is remembered per BeamNG vehicle in `GtaBeamD1_carmatch.txt`. **Match hidden car now** in the F7 menu forgets it and picks again. The first match measures GTA's models, which takes a few seconds once.
-- **Motorcycles** (2.84): export a BeamNG bike and ride a GTA motorcycle. The rider leans with BeamNG's lean, GTA still throws you off in a crash, and you can get off and back on.
-- **Seat adjust** (Ctrl+Shift+F10 in drive mode, or the F7 menu): moves you in the car, saved per BeamNG vehicle. Since 2.85 it also works with `PuppetSolid=1`: it moves the hidden GTA car (and you in it), so the drawn car stays on its wheels where BeamNG has it. GTA's traffic and props then meet the hidden car that far from the drawn one.
-- **Run BeamNG small and light.** Window mode at 1280x720 with the lowest graphics settings. You only see GTA's picture, so BeamNG's graphics are wasted video memory.
-- **Start BeamNG first**, on Grid, Small, Pure, with only your car spawned.
-- **The first drive in an area is slower.** GTA's ground is measured and built in BeamNG as you go. It's saved in `GtaBeamD1_map\` next to GTA, so later drives there are instant.
-- **Controller:** a PlayStation pad works through DS4Windows.
-
-## What works
-- **Your BeamNG car in GTA,** drawn with its paint, materials, glass and lights, in GTA's light, shadows and reflections.
-- **BeamNG's physics.** GTA's streets, hills, walls and ground surfaces are built in BeamNG, so the car grips, crumples and breaks the BeamNG way. Since 2.81 (`PuppetNoMap=1`) only BeamNG meets walls, kerbs and solid posts, so slow wall hits bend the bumper too.
-- **GTA's world reacts the vanilla way** (`PuppetSolid=1`, new in 2.77). GTA's cars get pushed and dented, people ragdoll, lamp posts break and bins fly, and your BeamNG car takes the hit.
-- **Traffic crashes crumple your car** (`TrafficProxies=4`, new in 2.83). A GTA car about to meet yours gets a box in BeamNG at its place, with a car's size and weight. BeamNG resolves that crash, so your car really hits something, and GTA's car is shoved the way its box was.
-- **Real damage on the car.** BeamNG's dents, broken glass, lost bumpers and wheels show in GTA.
-- **GTA's guns.** Bullets dent the car, leave holes, pop tyres and break windows. Explosions push it and set it on fire; a car that blows up becomes a charred wreck.
-- **On foot.** Get out, walk around the car, shoot it. Get back in and keep driving.
-- **Show cars** (Ctrl+Shift+F11), **pause sync** (pausing one game pauses the other), **BeamNG's engine sound** and GTA's radio on the phone.
-
-## Known issues
-- Things react to GTA's hidden car, not the exact shape of your BeamNG car (see Tips). The parts of your BeamNG car that stick out past the GTA car crumple against walls BeamNG's way; GTA's people and signs push your car and dent it at the contact point.
-- Traffic (2.83): the box in BeamNG is a hard block, so hits are harsher than car on car, and the GTA car you hit shows no dent yet. Trucks and buses still crash the 2.82 way (a push and a small dent). GTA's bikes get a bike-size box since 2.85 (`TrafficProxies=5` and the 5th `proxyPool` box). The first F10 of a BeamNG session waits about 10 seconds while the boxes are made.
-- Auto-match (2.85) deletes the GTA car it replaces (unless someone else is in it). GTA has no close match for some BeamNG vehicles (a 12 m wheel loader gets GTA's Bulldozer); the closest of the same kind is used.
-- With `PuppetSolid=1` you sit in the GTA car's seat in first person, not BeamNG's (Auto-match picks the GTA vehicle whose seat is closest; seat adjust fine-tunes it).
-- MSAA in GTA's graphics settings must be off (the log and an on-screen message say so when it's on).
-- Some hillsides and bridge decks can have holes or show up a few seconds late.
-- The camera can lag a little at low speed.
-- Crashes don't hurt you by default (2.81). Ctrl+F9 or `CrashHurt=1` turns it on; `crashMinDv` in `GtaBeamD1_weapons.json` sets how hard a crash must be.
-- Show cars stand still and can look flat-lit or show through the car you drive.
-- Door glass is missing on some cars. Tyre smoke is off (`TireSmoke=1` to try it).
-- Other mods' extra objects on the car in BeamNG (like a DARS driver) aren't brought into GTA.
+- **Car**:
+  - **Get car from BeamNG** (all in one).
+  - Export only.
+  - Put on / show / take off.
+  - Drive mode.
+  - Auto-match hidden car.
+  - **Match hidden car now**: forgets the remembered pick and picks again.
+- **Crashes and world**: crash damage to you, GTA's world reacts (`PuppetSolid`), traffic crash boxes, weapons, props, dents.
+- **Driving**: BeamNG gravity, speed gauge, pause sync, tyre smoke, seat adjust, and what seat adjust moves.
+- **Bikes**: lean steer, full lean, lean feedback.
+- **Other**: reload the ini and json files, close.
+- **Restart GTA/Mod** (in red, at the bottom). Each button asks Yes / No first:
+  - **Restart Grand Theft Auto V?** stops drive mode, closes GTA and starts it again: through Steam for the Steam version, else with `PlayGTAV.exe`. Unsaved story progress is lost. If it doesn't come back for your launcher, set `RestartGtaCommand` in the ini to the link or .exe that starts your GTA.
+  - **Restart the OpenGTANG mod?** stops drive mode, takes the car off, unloads the mod and loads it again, without closing GTA.
 
 ## Settings
-Everything is in `GtaBeamD1.ini`, with comments. The ones you're most likely to want:
-- `PuppetSolid=1` (default): GTA's world reacts to your car with GTA's own physics. `0` goes back to the 2.76 way (traffic you touch vanishes, set by `TrafficMode`).
-- `PuppetNoMap=1` (default, 2.81): GTA's hidden car ignores GTA's map and BeamNG's solid posts; BeamNG alone hits them. `0`: the 2.77 way.
-- `CrashHurt=0` (default, 2.81): crashes don't hurt you. `1`: they do (Ctrl+F9 switches it in game).
-- `AutoMatchCar=0` (2.85): `1` makes F11 swap the GTA car for the matching one (kind, seat, size; see Tips). `AutoMatchModels` lists the GTA models it picks from (empty: 164 built in, cars to buses and heavy machinery). The F7 menu's Get car always matches.
-- `MenuKey=0x76` (2.85): the in-game menu's key (F7).
-- `SeatMoves=gta` (2.85, with `PuppetSolid=1`): seat adjust moves the hidden GTA car and you, so the BeamNG car stays on its wheels. `beamng`: it moves the drawn car instead, and collisions stay exactly on it. Also a switch in the F7 menu.
-- `TrafficProxies=5` (default since 2.85, was 4 in 2.83; needs the 2.83 BeamNG mod): that many boxes wait in BeamNG. A GTA car about to meet yours gets one (sizes and weights: `proxyPool` in `GtaBeamD1_traffic.json`), BeamNG resolves the crash, GTA's car copies its box and the hidden car ignores that GTA car. `0`: the 2.82 way.
-- `PuppetPassCar=1` (2.82): only for GTA cars with no box. It doesn't stop GTA removing a traffic car the hidden car is teleported onto.
-- `Weapons=0` turns off weapon damage on the car.
-- `DriveGravity` sets how heavy the car feels (1.1).
-- `ShowCarsMax` (4) is how many show cars you can park; each one uses video memory.
-- `DriverSeatForwardM`, `DriverSeatUpM`, `DriverSeatRightM` move you in the seat for every car.
+Everything is in `GtaBeamD1.ini`, with comments. The original settings are explained in [ORIGINAL_README.md](ORIGINAL_README.md#settings). Added by OpenGTANG:
+- `MenuKey=0x76`: the menu's key (F7).
+- `AutoMatchCar=0`: `1` makes F11 swap the GTA car for the matching one too. The menu's Get car always matches.
+- `AutoMatchModels=`: the GTA models auto-match picks from. Empty: the built-in list, from cars and bikes to buses and heavy machinery.
+- `SeatMoves=gta`: with `PuppetSolid=1`, seat adjust moves the hidden GTA car and you, so the BeamNG car stays on its wheels. `beamng`: it moves the drawn car instead.
+- `TrafficProxies=5`: crash boxes in BeamNG for GTA's traffic, including one bike-size box.
+- `RestartGtaCommand=`: what Restart GTA starts. Empty: Steam's GTA V Legacy (`steam://rungameid/271590`), else `PlayGTAV.exe`.
+- `BikeLeanSteer`, `BikeLeanFullDeg`, `BikeLeanFeedback`: how a GTA bike follows BeamNG's lean.
 
-Game content lives in JSON next to the ini: `GtaBeamD1_surfaces.json` (GTA ground → BeamNG grip), `GtaBeamD1_props.json` (props), `GtaBeamD1_weapons.json` (damage per weapon; `crashMinDv` is how hard a crash must be to hurt you), `GtaBeamD1_traffic.json` (masses).
+Picks made by auto-match are kept in `GtaBeamD1_carmatch.txt` next to GTA, and GTA's measured model sizes in `GtaBeamD1_carsizes.txt`.
 
-## Bug reports
-Please attach both logs:
-- `GtaBeamD1.log` (GTA V folder)
-- `gtabridge_log.txt` (`%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\gtabridge\`)
+## Known issues
+The original mod's known issues are in [ORIGINAL_README.md](ORIGINAL_README.md#known-issues). In OpenGTANG:
+- Auto-match deletes the GTA car it replaces (unless someone else is in it).
+- GTA has no close match for some BeamNG vehicles (a 12 m wheel loader gets GTA's Bulldozer). The closest of the same kind is used.
+- With `PuppetSolid=1` you sit in the GTA car's seat in first person, not BeamNG's. Auto-match picks the closest seat, and seat adjust fine-tunes it.
+- **Restart GTA** was tested with the Steam version. The Rockstar and Epic versions are started with `PlayGTAV.exe`; if that doesn't work for yours, set `RestartGtaCommand`.
 
-## Roadmap
-Planned, in rough order. No dates, and things may change with your feedback.
+## Troubleshooting and bug reports
+- **Nothing happens in GTA**:
+  - Check that Script Hook V is installed and matches your GTA update: `ScriptHookV.log` in the GTA folder.
+  - Check that both `GtaBeamD1.asi` and `GtaBeamD1_core.dll` are next to `GTA5.exe`.
+  - `GtaBeamD1_loader.log` says whether the loader found and loaded the mod.
+- **"Asking BeamNG to export" never finishes**: start BeamNG first, check that gtabridge is enabled in BeamNG's Mods menu, and spawn a car.
+- **The car looks dark or see-through**: turn MSAA off.
 
-**Done in 2.85 (OpenGTANG)**
-- In-game menu (F7), with **Get car from BeamNG**: export, match and attach in one button.
-- The hidden GTA vehicle matched to your BeamNG one: by kind (BeamNG's Body Style), where you sit, and size; remembered per vehicle.
-- GTA's motorcycles and bicycles get a crash box in BeamNG; a hard hit knocks the rider off.
-- BeamNG 0.40: the driver's seat is read from its new occupant cameras (the seat feature had stopped finding it).
-- Bikes that lean on their stand when placed (the GTA IV Angel) start drive mode.
-- Heavy machinery: exports with a part under two parents (the wl40 wheel loader) load, and wide tyres (0.8 m) spin and follow their hubs.
-- Fix: the right-side wheels of every car spun backwards in drive mode.
-- Fix: seat adjust did nothing with `PuppetSolid=1`.
-
-**Done in 2.84 (OpenGTANG)**
-- Motorcycles: BeamNG bikes on GTA bikes, with the lean, the rider's pose, getting off and on, and GTA's crash ejection.
-
-**Done in 2.83**
-- Low-speed crashes: your BeamNG car crumples against walls, kerbs and posts at any speed.
-- Crash damage on/off key (Ctrl+F9), off by default.
-- Fix for slow motion (Wasted, weapon wheel) making the car jump.
-- Soft-body hits from GTA's traffic: your car crumples where it's hit.
-
-**Planned**
-- Better soft-body hits from GTA's people and props: your car crumples where it's hit.
-- Tyre smoke and screech when the wheels spin.
-- No more holes on hills and bridges.
-- Smoother camera at low speed.
-- UI: BeamNG's menus and apps usable from inside GTA.
-- A launcher: one click starts BeamNG (Grid, Small, Pure) and then GTA.
-- Show cars with proper lighting; door glass on every car.
-- Steering wheel and force feedback support.
-- A second BeamNG car on the road (AI chases, trailers).
-- GTA V Enhanced edition support.
+Please attach both logs to bug reports ([Issues](https://github.com/SystemDetonation/OpenGTANG/issues)):
+- `GtaBeamD1.log`, in the GTA V folder.
+- `gtabridge_log.txt`, in `%LOCALAPPDATA%\BeamNG\BeamNG.drive\current\gtabridge\`.
 
 ## Building from source
-The source is in `source\`. Since 2.85 the mod is two files in the GTA folder:
-- `GtaBeamD1.asi` (`loader.cpp`): a small loader. Script Hook V loads it once and can't unload it.
-- `GtaBeamD1_core.dll` (`GtaBeamD1.cpp` + `carmodel.cpp`): the mod itself. The loader runs a copy of it from `%TEMP%\OpenGTANG`, so the file in the GTA folder isn't locked. Copy a new build over it, then pick **Restart the OpenGTANG mod?** at the bottom of the F7 menu (or press Ctrl+Shift+F7): drive mode stops, the car comes off, and the new build loads without restarting GTA. `GtaBeamD1_loader.log` says what the loader did.
-- The F7 menu's **Restart Grand Theft Auto V?** closes GTA and starts it again through Steam (`RestartGtaCommand` in the ini to change that).
-- Build `-DGTANG_STANDALONE` for the old single `GtaBeamD1.asi` (no loader, no mod restart); the sandbox tests use that.
+The source is in `source\`. The mod is two files:
+- `GtaBeamD1.asi`, from `loader.cpp`: a small loader. Script Hook V loads it once and can't unload it.
+- `GtaBeamD1_core.dll`, from `GtaBeamD1.cpp` + `carmodel.cpp`: the mod itself. The loader runs a copy of it from `%TEMP%\OpenGTANG`, so the file in the GTA folder isn't locked and a new build loads with Ctrl+Shift+F7.
 
-- Windows with Visual Studio 2022: run `source\build_vs2022.bat` (needs the Script Hook V SDK's `ScriptHookV.lib`).
-- Linux/CI: `zig c++ -target x86_64-windows-gnu` (see `source\test\build_all.sh`). That folder also has the tests, with a fake Script Hook V and a fake BeamNG for runs under Wine. They test the code, not GTA's physics.
+To build:
+- **Visual Studio 2022:** run `source\build_vs2022.bat`. It needs the Script Hook V SDK's `ScriptHookV.lib` in `source\sdk\lib\`.
+- **zig** (`pip install ziglang`):
+  ```
+  python -m ziglang c++ -target x86_64-windows-gnu -std=c++17 -O2 -c -o build\GtaBeamD1.o GtaBeamD1.cpp
+  python -m ziglang c++ -target x86_64-windows-gnu -std=c++17 -O2 -c -o build\carmodel.o carmodel.cpp
+  python -m ziglang c++ -target x86_64-windows-gnu -std=c++17 -O2 -c -o build\loader.o loader.cpp
+  python -m ziglang c++ -target x86_64-windows-gnu -std=c++17 -O2 -shared -o build\GtaBeamD1_core.dll build\GtaBeamD1.o build\carmodel.o build\ScriptHookV.lib -luser32 -lws2_32
+  python -m ziglang c++ -target x86_64-windows-gnu -std=c++17 -O2 -shared -o build\GtaBeamD1.asi build\loader.o build\ScriptHookV.lib -luser32
+  ```
+- `-DGTANG_STANDALONE` builds the old single `GtaBeamD1.asi` (no loader, no mod restart). The tests in `source\test\` use it: a fake Script Hook V and a fake BeamNG for runs under Wine (`build_all.sh`). They test the code, not GTA's physics.
 
 ## Credits and licences
-- **GTA x Beam** by Treto420, [MIT licence](LICENSE): use, change and share the code freely, including in your own mods, as long as you keep the licence and credit (Treto420). Third-party parts below keep their own licences.
-- [Script Hook V](http://www.dev-c.com/gtav/scripthookv/) by Alexander Blade.
+- **[GTA x Beam](https://github.com/Treto420/GTANG) by Treto420**: the mod this is built on. MIT licence ([LICENSE](LICENSE)).
+- **OpenGTANG changes** by SystemDetonation, under the same MIT licence.
+- [Script Hook V](http://www.dev-c.com/gtav/scripthookv/) by Alexander Blade (not included).
 - [cgltf](https://github.com/jkuhlmann/cgltf) (MIT), [stb_image](https://github.com/nothings/stb) (MIT / public domain), [bcdec](https://github.com/iOrange/bcdec) (MIT / Unlicense).
 - Inspired by [SkyCraft](https://github.com/chasmlol/SkyCraft) (Skyrim x Minecraft passthrough).
 - Licence texts are in `licences\`.

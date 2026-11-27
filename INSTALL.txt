@@ -1,0 +1,55 @@
+OpenGTANG 2.85 - install
+========================
+OpenGTANG is a fork of GTA x Beam by Treto420 (https://github.com/Treto420/GTANG, MIT licence).
+Drive BeamNG.drive's cars and bikes in GTA V's world. Story mode only.
+Full guide: README.md, and the original mod's guide in ORIGINAL_README.md.
+Home: https://github.com/SystemDetonation/OpenGTANG
+
+YOU NEED
+- GTA V Legacy for PC (Steam, Rockstar Games Launcher or Epic). Not the Enhanced edition.
+- Script Hook V, from http://www.dev-c.com/gtav/scripthookv/ (not included).
+- BeamNG.drive 0.40 or newer.
+
+1. SCRIPT HOOK V (once)
+   From Script Hook V's "bin" folder, copy ScriptHookV.dll and dinput8.dll into your GTA V folder
+   (the folder with GTA5.exe). Usually:
+     Steam:    C:\Program Files (x86)\Steam\steamapps\common\Grand Theft Auto V
+               (or in Steam: right-click GTA V > Manage > Browse local files)
+     Rockstar: C:\Program Files\Rockstar Games\Grand Theft Auto V
+     Epic:     C:\Program Files\Epic Games\GTAV
+
+2. GTA V PART
+   Copy everything in this zip's GTA folder into your GTA V folder (next to GTA5.exe):
+     GtaBeamD1.asi        the OpenGTANG loader (Script Hook V loads it)
+     GtaBeamD1_core.dll   the mod itself (both files are needed)
+     GtaBeamD1.ini        settings
+     GtaBeamD1_*.json     game content (props, ground grip, traffic, weapons)
+
+3. BEAMNG.DRIVE PART
+   Paste this into Explorer's address bar and press Enter (make the "unpacked" folder if it's missing):
+     %LOCALAPPDATA%\BeamNG\BeamNG.drive\current\mods\unpacked\
+   Copy this zip's BeamNG\gtabridge folder into it, so you get ...\mods\unpacked\gtabridge\lua\...
+   In BeamNG's Mods menu, check that gtabridge is enabled.
+
+4. GTA SETTING
+   Turn MSAA OFF in GTA's graphics settings (with it on, the car looks dark or see-through).
+
+FIRST DRIVE
+   1. Start BeamNG first. Load the level "Grid, Small, Pure" and spawn your car or bike.
+   2. Start GTA V in story mode. A message says the mod has loaded.
+   3. Press F7 and pick "Get car from BeamNG" (the first export takes a while).
+   4. Press F10 to drive with your own BeamNG controls. F10 again stops.
+
+UPDATING (from an older OpenGTANG, or from GTA x Beam 2.77 / 2.83)
+   Back up your GtaBeamD1.ini if you changed settings. Copy the GTA files over the old ones (say yes to
+   replacing; GtaBeamD1_core.dll is new). Copy gtabridge over the old one in mods\unpacked and restart
+   BeamNG. Put your own values back in the new ini (an old ini also still works).
+
+KEYS
+   F7 menu | Ctrl+Shift+F7 restart the mod without closing GTA | Shift+F11 get car | F11 put on / off
+   F10 drive | Ctrl+Shift+F10 seat adjust | Ctrl+F9 crash damage to you | Ctrl+F11 reload the ini
+
+IF IT DOESN'T WORK
+   GTA V folder: ScriptHookV.log (Script Hook V), GtaBeamD1_loader.log (the loader), GtaBeamD1.log (the mod).
+   BeamNG: %LOCALAPPDATA%\BeamNG\BeamNG.drive\current\gtabridge\gtabridge_log.txt
+   Bug reports with both GtaBeamD1.log and gtabridge_log.txt: https://github.com/SystemDetonation/OpenGTANG/issues
