@@ -12208,14 +12208,14 @@ namespace
 		DriveState& d = g_drv;
 		auto        it = g_seat.cars.find(d.vehB);
 		const auto  o = it != g_seat.cars.end() ? it->second : std::array<double, 3>{ 0, 0, 0 };
-		// v2.85 (OpenGTANG): with PuppetSolid, GTA's solid car stays on BeamNG's car (v2.77), so your seat moves only the drawn car
-		// around you (you forward = the drawn car back); without it, GTA's car moves as before. Your test: seat adjust changed the
-		// numbers but nothing moved (v2.77 had left it off with PuppetSolid)
-		const bool solid = g_cfg.puppetSolid;
-		d.lx = g_seat.base[0] - (solid ? 0.0 : o[0]);
-		d.ly = g_seat.base[1] - (solid ? 0.0 : o[1]);
-		d.lz = g_seat.base[2] - (solid ? 0.0 : o[2]);
-		for (int k = 0; k < 3; ++k) d.drawOff[k] = solid ? -o[k] : 0.0;
+		// v2.85 (OpenGTANG): your seat moves GTA's car (and you in it) against BeamNG's car, with PuppetSolid too (v2.77 had left it
+		// off there: the numbers changed and nothing moved). The drawn car stays where BeamNG has it, wheels on the ground (the first
+		// 2.85 try moved the drawn car instead: raising your seat sank the Piccolina into the road). GTA's traffic and props then meet
+		// the hidden car that far from the drawn one; with PuppetNoMap the map (ground, walls) is BeamNG's alone anyway
+		d.lx = g_seat.base[0] - o[0];
+		d.ly = g_seat.base[1] - o[1];
+		d.lz = g_seat.base[2] - o[2];
+		for (int k = 0; k < 3; ++k) d.drawOff[k] = 0.0;
 	}
 	void DrvSeatEye();
 	void DrvSeat()
@@ -12322,7 +12322,7 @@ namespace
 		if (!g_cfg.driverSeat) return;
 		if (g_cfg.puppetSolid) {  // v2.77: the seat offset would move GTA's solid body away from the drawn car
 			static int said = 0;
-			if (said++ < 2) Log("drive (v2.77): driver's seat: PuppetSolid: GTA's car stays on the drawn car's footprint (you sit in GTA's seat; v2.85: seat adjust moves the drawn car)");
+			if (said++ < 2) Log("drive (v2.77): driver's seat: PuppetSolid: GTA's car stays on the drawn car's footprint (you sit in GTA's seat; v2.85: seat adjust moves GTA's car against it)");
 			return;
 		}
 		if (!d.eyeOk || !d.headOk) {

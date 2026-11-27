@@ -51,7 +51,7 @@ Driving uses your own BeamNG controls and bindings (gears, clutch, drive modes).
 
   Each pick is remembered per BeamNG vehicle in `GtaBeamD1_carmatch.txt`. **Match hidden car now** in the F7 menu forgets it and picks again. The first match measures GTA's models, which takes a few seconds once.
 - **Motorcycles** (2.84): export a BeamNG bike and ride a GTA motorcycle. The rider leans with BeamNG's lean, GTA still throws you off in a crash, and you can get off and back on.
-- **Seat adjust** (Ctrl+Shift+F10 in drive mode, or the F7 menu): moves you in the car, saved per BeamNG vehicle. Since 2.85 it also works with `PuppetSolid=1`: it moves the drawn car around you, and the hidden GTA car stays where the collisions need it.
+- **Seat adjust** (Ctrl+Shift+F10 in drive mode, or the F7 menu): moves you in the car, saved per BeamNG vehicle. Since 2.85 it also works with `PuppetSolid=1`: it moves the hidden GTA car (and you in it), so the drawn car stays on its wheels where BeamNG has it. GTA's traffic and props then meet the hidden car that far from the drawn one.
 - **Run BeamNG small and light.** Window mode at 1280x720 with the lowest graphics settings. You only see GTA's picture, so BeamNG's graphics are wasted video memory.
 - **Start BeamNG first**, on Grid, Small, Pure, with only your car spawned.
 - **The first drive in an area is slower.** GTA's ground is measured and built in BeamNG as you go. It's saved in `GtaBeamD1_map\` next to GTA, so later drives there are instant.
