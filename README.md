@@ -4,7 +4,7 @@
 
 OpenGTANG is a fork of [GTA x Beam](https://github.com/Treto420/GTANG) by **Treto420** (MIT licence). GTA V runs the world, the walking and the guns. BeamNG.drive runs the car. Both games run at the same time and talk to each other on your PC. In GTA you see and drive your BeamNG car, with its real crumple, on GTA's streets, and GTA's traffic, people and lamp posts react to it.
 
-All of that is Treto420's work. OpenGTANG adds motorcycles, an in-game menu, a one-button car setup and a hot-reloading mod (see [What OpenGTANG adds](#what-opengtang-adds)). The original mod's full guide is in **[ORIGINAL_README.md](ORIGINAL_README.md)**, kept as Treto420 wrote it: how it works, tips, what works, known issues and all the settings.
+All of that is Treto420's work. OpenGTANG adds motorcycles, an in-game menu, a one-button car setup, a hot-reloading mod, and much more coming soon (see [What OpenGTANG adds](#what-opengtang-adds)). The original mod's full guide is in **[ORIGINAL_README.md](ORIGINAL_README.md)**, kept as Treto420 wrote it: how it works, tips, what works, known issues and all the settings.
 
 > Single-player only (story mode). Script Hook V closes GTA V in GTA Online. Free, non-commercial fan project; not affiliated with Rockstar Games, BeamNG GmbH or Treto420.
 
